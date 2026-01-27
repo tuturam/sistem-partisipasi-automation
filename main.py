@@ -6,6 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 from dotenv import load_dotenv
 import time
 
@@ -83,9 +84,27 @@ def do_tiktok_task(url):
 
     time.sleep(2)
 
-def do_instagram_task(url):
-    """Follow + Like on Instagram"""
-    driver.get(url)
+def convert_instagram_reel_to_post(url):
+    """Convert reels/reel URL to post /p/ URL if applicable"""
+    lower_url = url.lower()
+    if '/reels/' in lower_url or '/reel/' in lower_url:
+        parts = url.split('/')
+        post_id = None
+        for i, part in enumerate(parts):
+            if part.lower() in ('reels', 'reel') and i + 1 < len(parts):
+                post_id = parts[i + 1].split('?')[0].split('#')[0]
+                break
+        if post_id:
+            new_url = f"https://www.instagram.com/p/{post_id}/"
+            if new_url != url:
+                print(f"  - Converted URL to: {new_url}")
+            return new_url
+    return url
+
+
+def perform_instagram_actions(target_url):
+    """Run follow + like steps on a single Instagram URL"""
+    driver.get(target_url)
     time.sleep(5)
 
     wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
@@ -105,7 +124,6 @@ def do_instagram_task(url):
     except:
         print("  - Follow button not found")
 
-    # Note: Multiple Like buttons exist (comments + post), the LAST one is the post like
     try:
         like_svgs = driver.find_elements(By.CSS_SELECTOR, 'svg[aria-label="Like"]')
         if not like_svgs:
@@ -130,6 +148,19 @@ def do_instagram_task(url):
         print(f"  - Like error: {e}")
 
     time.sleep(2)
+
+
+def do_instagram_task(url):
+    """Follow + Like on Instagram; always normalize reels to /p/ before visiting"""
+    target_url = convert_instagram_reel_to_post(url)
+    if target_url != url:
+        print(f"  - Normalized to post URL: {target_url}")
+
+    try:
+        perform_instagram_actions(target_url)
+    except TimeoutException:
+        print("  - Timeout detected, retrying once with normalized URL...")
+        perform_instagram_actions(target_url)
 
 def do_youtube_task(url):
     """Subscribe + Like + Watch on YouTube"""
@@ -209,14 +240,42 @@ def upload_proof_and_submit(task_link, screenshot_path):
     time.sleep(1)
 
     try:
+        # Click main submit button (outside dialog)
         submit_btn = driver.find_element(By.XPATH, "//button[text()='Submit' and not(ancestor::dialog)]")
         WebDriverWait(driver, 30).until(
             lambda d: submit_btn.get_attribute('disabled') is None
         )
         current_url = driver.current_url
         submit_btn.click()
+        time.sleep(2)
+        print("  - Clicked submit button")
+        
+        # Check if expired reason dialog appears
+        try:
+            dialog = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.ID, 'upload_reason_modal'))
+            )
+            if dialog.is_displayed():
+                print("  - Task expired dialog detected")
+                
+                # Fill textarea with reason
+                reason_textarea = dialog.find_element(By.TAG_NAME, 'textarea')
+                reason_textarea.clear()
+                reason_textarea.send_keys("-")
+                print("  - Filled expired reason")
+                time.sleep(1)
+                
+                # Click Submit button inside the dialog
+                dialog_submit_btn = dialog.find_element(By.XPATH, ".//button[text()='Submit']")
+                dialog_submit_btn.click()
+                print("  - Submitted expired reason")
+                time.sleep(2)
+        except TimeoutException:
+            print("  - No expired dialog (submitted on time)")
+        
+        # Wait for URL change to confirm submission
         WebDriverWait(driver, 30).until(EC.url_changes(current_url))
-        print(f"  - Submitted!")
+        print(f"  - Submitted successfully!")
     except Exception as e:
         print(f"  - Submit error: {e}")
 
@@ -254,16 +313,21 @@ task_data = {}
 for i, task_link in enumerate(task_links, 1):
     print(f"=== Processing Task {i} ===")
 
-    driver.get(task_link)
-    time.sleep(2)
+    try:
+        driver.get(task_link)
+        time.sleep(2)
 
-    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.prose')))
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.prose')))
 
-    description_el = driver.find_element(By.CSS_SELECTOR, '.prose')
-    urls = extract_urls_from_description(description_el)
+        description_el = driver.find_element(By.CSS_SELECTOR, '.prose')
+        urls = extract_urls_from_description(description_el)
 
-    if not urls:
-        print(f"  No URLs found in task description")
+        if not urls:
+            print(f"  No URLs found in task description")
+            continue
+    except Exception as e:
+        print(f"  ❌ Error loading task {i}: {type(e).__name__}: {str(e)[:100]}")
+        print(f"  Skipping to next task...")
         continue
 
     print(f"  Found URLs: {urls}")
@@ -272,19 +336,24 @@ for i, task_link in enumerate(task_links, 1):
         platform = get_platform(url)
         print(f"  Platform: {platform}")
 
-        if platform == 'tiktok':
-            do_tiktok_task(url)
-        elif platform == 'instagram':
-            do_instagram_task(url)
-        elif platform == 'youtube':
-            do_youtube_task(url)
-        else:
-            print(f"  Unknown platform for URL: {url}")
-            driver.get(url)
-            time.sleep(3)
+        try:
+            if platform == 'tiktok':
+                do_tiktok_task(url)
+            elif platform == 'instagram':
+                do_instagram_task(url)
+            elif platform == 'youtube':
+                do_youtube_task(url)
+            else:
+                print(f"  Unknown platform for URL: {url}")
+                driver.get(url)
+                time.sleep(3)
 
-        screenshot_path = take_screenshot(i)
-        task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
+            screenshot_path = take_screenshot(i)
+            task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
+        except Exception as e:
+            print(f"  ❌ Error processing task {i}: {type(e).__name__}: {str(e)[:100]}")
+            print(f"  Skipping to next task...")
+            continue
 
 print("\n=== All social media tasks completed! ===")
 print(f"Screenshots saved to: {screenshot_dir}")
