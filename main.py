@@ -19,6 +19,8 @@ CHROME_PROFILE_PATH = os.getenv('CHROME_PROFILE_PATH')
 options = Options()
 options.add_argument(f"--user-data-dir={CHROME_PROFILE_PATH}")
 
+# options.add_argument(f"--headless=new")
+
 driver = webdriver.Chrome(options=options)
 driver.set_window_size(1280, 800)
 
@@ -169,6 +171,80 @@ def do_youtube_task(url):
 
     wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
     time.sleep(5)
+
+    """Pasti ke akhir video dengan verifikasi"""
+    
+    print("\n⏩ Mencoba ke akhir video...")
+    
+    # Tunggu video benar-benar ready
+    try:
+        WebDriverWait(driver, 5).until(
+            lambda d: d.execute_script("""
+                return document.readyState === 'complete' && 
+                       document.querySelector('video') && 
+                       document.querySelector('video').duration > 0;
+            """)
+        )
+    except:
+        print("  Video belum ready, lanjut anyway...")
+    
+    # Script SINGLE yang mencoba semua kemungkinan
+    result = driver.execute_script("""
+        try {
+            // Coba cara 1: Video element langsung
+            var videos = document.querySelectorAll('video');
+            for (var i = 0; i < videos.length; i++) {
+                if (videos[i].duration > 0) {
+                    videos[i].currentTime = videos[i].duration - 0.5;
+                    console.log('Set video[' + i + '] to ' + (videos[i].duration - 0.5));
+                    return {success: true, method: 'video_element', time: videos[i].currentTime, duration: videos[i].duration};
+                }
+            }
+            
+            // Coba cara 2: YouTube player
+            if (window.ytplayer && ytplayer.config && ytplayer.config.args) {
+                var duration = ytplayer.config.args.length_seconds;
+                var video = document.querySelector('video');
+                if (video && duration) {
+                    video.currentTime = duration - 0.5;
+                    return {success: true, method: 'ytplayer_config', time: video.currentTime, duration: duration};
+                }
+            }
+            
+            // Coba cara 3: Movie player
+            var moviePlayer = document.getElementById('movie_player');
+            if (moviePlayer && typeof moviePlayer.seekTo === 'function') {
+                var duration = moviePlayer.getDuration();
+                if (duration) {
+                    moviePlayer.seekTo(duration - 0.5, true);
+                    return {success: true, method: 'movie_player', time: duration - 0.5, duration: duration};
+                }
+            }
+            
+            // Coba cara 4: Brute force
+            var videoEl = document.querySelector('video');
+            if (videoEl) {
+                // Set ke waktu besar, biar browser handle
+                videoEl.currentTime = 9999999;
+                return {success: true, method: 'brute_force', time: 9999999, duration: videoEl.duration};
+            }
+            
+            return {success: false, error: 'No video element found'};
+            
+        } catch (err) {
+            return {success: false, error: err.toString()};
+        }
+    """)
+    
+    if result['success']:
+        print(f"  ✅ BERHASIL ke akhir video!")
+        print(f"     Method: {result.get('method', 'unknown')}")
+        if 'time' in result and 'duration' in result:
+            print(f"     Posisi: {result['time']:.1f} / {result['duration']:.1f} detik")
+    else:
+        print(f"  ❌ GAGAL: {result.get('error', 'Unknown error')}")
+    
+    time.sleep(3)  # Tunggu proses selesai
 
     try:
         subscribe_btn = driver.find_element(By.CSS_SELECTOR, 'ytd-subscribe-button-renderer button')
