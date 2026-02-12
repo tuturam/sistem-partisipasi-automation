@@ -68,7 +68,17 @@ def do_tiktok_task(url):
         pass
 
     try:
-        follow_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Follow')]")
+        follow_btn = None
+        try:
+            # Try TikTok-specific data-e2e selector first
+            follow_btn = driver.find_element(By.CSS_SELECTOR, '[data-e2e="follow-button"]')
+        except:
+            try:
+                # Fallback to text-based XPath
+                follow_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Follow')]")
+            except:
+                pass
+        
         if follow_btn and 'Following' not in follow_btn.text:
             follow_btn.click()
             time.sleep(1)
@@ -113,14 +123,30 @@ def perform_instagram_actions(target_url):
     time.sleep(3)
 
     try:
-        follow_btns = driver.find_elements(By.XPATH, "//button[contains(text(), 'Follow')]")
-        for btn in follow_btns:
-            btn_text = btn.text.strip().lower()
-            if btn_text == 'follow':
-                btn.click()
-                time.sleep(2)
-                print("  - Followed!")
-                break
+        follow_btns = None
+        try:
+            # Try nested div structure (new Instagram layout)
+            follow_btns = driver.find_elements(By.XPATH, "//button[.//div[contains(text(), 'Follow')]]")
+        except:
+            pass
+        
+        if not follow_btns:
+            try:
+                # Fallback to old structure
+                follow_btns = driver.find_elements(By.XPATH, "//button[contains(text(), 'Follow')]")
+            except:
+                pass
+        
+        if follow_btns:
+            for btn in follow_btns:
+                btn_text = btn.text.strip().lower()
+                if btn_text == 'follow':
+                    btn.click()
+                    time.sleep(2)
+                    print("  - Followed!")
+                    break
+            else:
+                print("  - Already following or no Follow button")
         else:
             print("  - Already following or no Follow button")
     except:
