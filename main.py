@@ -78,7 +78,7 @@ def do_tiktok_task(url):
                 follow_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Follow')]")
             except:
                 pass
-        
+
         if follow_btn and 'Following' not in follow_btn.text:
             follow_btn.click()
             time.sleep(1)
@@ -129,14 +129,14 @@ def perform_instagram_actions(target_url):
             follow_btns = driver.find_elements(By.XPATH, "//button[.//div[contains(text(), 'Follow')]]")
         except:
             pass
-        
+
         if not follow_btns:
             try:
                 # Fallback to old structure
                 follow_btns = driver.find_elements(By.XPATH, "//button[contains(text(), 'Follow')]")
             except:
                 pass
-        
+
         if follow_btns:
             for btn in follow_btns:
                 btn_text = btn.text.strip().lower()
@@ -190,6 +190,83 @@ def do_instagram_task(url):
         print("  - Timeout detected, retrying once with normalized URL...")
         perform_instagram_actions(target_url)
 
+def handle_youtube_ads(max_wait=60):
+    """Detect and skip YouTube ads if they appear"""
+    print("\n🔍 Checking for YouTube ads...")
+
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        # Check if an ad is currently playing
+        is_ad = driver.execute_script("""
+            var player = document.getElementById('movie_player');
+            if (player && player.classList.contains('ad-showing')) return true;
+            if (document.querySelector('.ad-showing')) return true;
+            if (document.querySelector('.ytp-ad-player-overlay')) return true;
+            return false;
+        """)
+
+        if not is_ad:
+            print("  ✅ No ad playing, continuing...")
+            break
+
+        print("  ⚠️ Ad detected! Looking for skip button...")
+
+        # Try to find and click skip button with various selectors
+        skip_selectors = [
+            ".ytp-skip-ad-button",
+            ".ytp-ad-skip-button",
+            ".ytp-ad-skip-button-modern",
+            "button.ytp-ad-skip-button",
+            "button.ytp-ad-skip-button-modern",
+            ".ytp-ad-skip-button-container button",
+            "button[class*='ytp-ad-skip']",
+            ".ytp-skip-ad-button__text",
+        ]
+
+        skipped = False
+        for selector in skip_selectors:
+            try:
+                skip_btn = driver.find_element(By.CSS_SELECTOR, selector)
+                if skip_btn.is_displayed() and skip_btn.is_enabled():
+                    print(f"  🎯 Skip button found! ({selector})")
+                    time.sleep(0.5)
+                    try:
+                        skip_btn.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", skip_btn)
+                    print("  🎉 Ad skipped!")
+                    skipped = True
+                    time.sleep(2)
+                    break
+            except:
+                continue
+
+        if skipped:
+            # Check if another ad appears (sometimes there are 2 ads)
+            time.sleep(2)
+            is_still_ad = driver.execute_script("""
+                var player = document.getElementById('movie_player');
+                if (player && player.classList.contains('ad-showing')) return true;
+                return false;
+            """)
+            if is_still_ad:
+                print("  ⚠️ Another ad detected, waiting again...")
+                continue
+            else:
+                print("  ✅ All ads handled!")
+                break
+        else:
+            # No skip button yet, wait a bit
+            elapsed = int(time.time() - start_time)
+            if elapsed % 5 == 0:
+                print(f"    Waiting for skip button... {elapsed}s / {max_wait}s")
+            time.sleep(1)
+
+    else:
+        print("  ⏰ Ad wait timeout reached, continuing anyway...")
+
+
 def do_youtube_task(url):
     """Subscribe + Like + Watch on YouTube"""
     driver.get(url)
@@ -198,22 +275,26 @@ def do_youtube_task(url):
     wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
     time.sleep(5)
 
+    # Handle ads before doing anything else
+    handle_youtube_ads(max_wait=60)
+    time.sleep(2)
+
     """Pasti ke akhir video dengan verifikasi"""
-    
+
     print("\n⏩ Mencoba ke akhir video...")
-    
+
     # Tunggu video benar-benar ready
     try:
         WebDriverWait(driver, 5).until(
             lambda d: d.execute_script("""
-                return document.readyState === 'complete' && 
-                       document.querySelector('video') && 
+                return document.readyState === 'complete' &&
+                       document.querySelector('video') &&
                        document.querySelector('video').duration > 0;
             """)
         )
     except:
         print("  Video belum ready, lanjut anyway...")
-    
+
     # Script SINGLE yang mencoba semua kemungkinan
     result = driver.execute_script("""
         try {
@@ -226,7 +307,7 @@ def do_youtube_task(url):
                     return {success: true, method: 'video_element', time: videos[i].currentTime, duration: videos[i].duration};
                 }
             }
-            
+
             // Coba cara 2: YouTube player
             if (window.ytplayer && ytplayer.config && ytplayer.config.args) {
                 var duration = ytplayer.config.args.length_seconds;
@@ -236,7 +317,7 @@ def do_youtube_task(url):
                     return {success: true, method: 'ytplayer_config', time: video.currentTime, duration: duration};
                 }
             }
-            
+
             // Coba cara 3: Movie player
             var moviePlayer = document.getElementById('movie_player');
             if (moviePlayer && typeof moviePlayer.seekTo === 'function') {
@@ -246,7 +327,7 @@ def do_youtube_task(url):
                     return {success: true, method: 'movie_player', time: duration - 0.5, duration: duration};
                 }
             }
-            
+
             // Coba cara 4: Brute force
             var videoEl = document.querySelector('video');
             if (videoEl) {
@@ -254,14 +335,14 @@ def do_youtube_task(url):
                 videoEl.currentTime = 9999999;
                 return {success: true, method: 'brute_force', time: 9999999, duration: videoEl.duration};
             }
-            
+
             return {success: false, error: 'No video element found'};
-            
+
         } catch (err) {
             return {success: false, error: err.toString()};
         }
     """)
-    
+
     if result['success']:
         print(f"  ✅ BERHASIL ke akhir video!")
         print(f"     Method: {result.get('method', 'unknown')}")
@@ -269,7 +350,7 @@ def do_youtube_task(url):
             print(f"     Posisi: {result['time']:.1f} / {result['duration']:.1f} detik")
     else:
         print(f"  ❌ GAGAL: {result.get('error', 'Unknown error')}")
-    
+
     time.sleep(3)  # Tunggu proses selesai
 
     try:
@@ -351,7 +432,7 @@ def upload_proof_and_submit(task_link, screenshot_path):
         submit_btn.click()
         time.sleep(2)
         print("  - Clicked submit button")
-        
+
         # Check if expired reason dialog appears
         try:
             dialog = WebDriverWait(driver, 5).until(
@@ -359,14 +440,14 @@ def upload_proof_and_submit(task_link, screenshot_path):
             )
             if dialog.is_displayed():
                 print("  - Task expired dialog detected")
-                
+
                 # Fill textarea with reason
                 reason_textarea = dialog.find_element(By.TAG_NAME, 'textarea')
                 reason_textarea.clear()
                 reason_textarea.send_keys("-")
                 print("  - Filled expired reason")
                 time.sleep(1)
-                
+
                 # Click Submit button inside the dialog
                 dialog_submit_btn = dialog.find_element(By.XPATH, ".//button[text()='Submit']")
                 dialog_submit_btn.click()
@@ -374,7 +455,7 @@ def upload_proof_and_submit(task_link, screenshot_path):
                 time.sleep(2)
         except TimeoutException:
             print("  - No expired dialog (submitted on time)")
-        
+
         # Wait for URL change to confirm submission
         WebDriverWait(driver, 30).until(EC.url_changes(current_url))
         print(f"  - Submitted successfully!")
@@ -447,8 +528,8 @@ for i, task_link in enumerate(task_links, 1):
                 do_youtube_task(url)
             else:
                 print(f"  Unknown platform for URL: {url}")
-                driver.get(url)
-                time.sleep(3)
+                print("Platform not social media, skipping...")
+                break
 
             screenshot_path = take_screenshot(i)
             task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
