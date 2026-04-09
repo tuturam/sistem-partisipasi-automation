@@ -124,16 +124,26 @@ def perform_instagram_actions(target_url):
 
     try:
         follow_btns = None
+        selectors = [
+            "//button[.//div[contains(text(), 'Follow')]]",
+            "//div[@role='button'][descendant-or-self::*[contains(text(), 'Follow')]]",
+        ]
         try:
             # Try nested div structure (new Instagram layout)
-            follow_btns = driver.find_elements(By.XPATH, "//button[.//div[contains(text(), 'Follow')]]")
+            for sel in selectors:
+                follow_btns = driver.find_elements(By.XPATH, sel)
+                if follow_btns:
+                    break
         except:
             pass
 
         if not follow_btns:
             try:
                 # Fallback to old structure
-                follow_btns = driver.find_elements(By.XPATH, "//button[contains(text(), 'Follow')]")
+                for sel in selectors:
+                    follow_btns = driver.find_elements(By.XPATH, sel)
+                    if follow_btns:
+                        break
             except:
                 pass
 
