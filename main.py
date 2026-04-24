@@ -1,4 +1,6 @@
 import os
+import requests
+import json
 from datetime import datetime
 from urllib.parse import urlparse
 from selenium import webdriver
@@ -9,26 +11,128 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from dotenv import load_dotenv
 import time
+import subprocess
 
-load_dotenv()
+basedir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(basedir, '.env'))
+
+PID_FILE = os.path.join(basedir, "bot.pid")
 
 EMAIL = os.getenv('EMAIL')
 PASSWORD = os.getenv('PASSWORD')
 CHROME_PROFILE_PATH = os.getenv('CHROME_PROFILE_PATH')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+HEADLESS_MODE = os.getenv('HEADLESS_MODE', 'False').lower() == 'true'
 
-options = Options()
-options.add_argument(f"--user-data-dir={CHROME_PROFILE_PATH}")
+driver = None
+wait = None
+screenshot_dir = None
 
-# options.add_argument(f"--headless=new")
+def cleanup_browser_process():
+    if not CHROME_PROFILE_PATH:
+        return
+    
+    print(f"\n[Cleanup] Mencari proses Brave yang menggunakan profile: {CHROME_PROFILE_PATH}")
+    try:
+        # Get process list with command lines using PowerShell
+        # This is more robust on Windows than wmic
+        ps_cmd = f'Get-CimInstance Win32_Process -Filter "Name = \'brave.exe\'" | Select-Object ProcessId, CommandLine | ConvertTo-Json'
+        cmd = ["powershell", "-Command", ps_cmd]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.stdout.strip():
+            import json
+            try:
+                data = json.loads(result.stdout)
+                # PowerShell might return a single object or a list
+                processes = data if isinstance(data, list) else [data]
+                
+                for proc in processes:
+                    cmd_line = proc.get('CommandLine', '')
+                    pid = proc.get('ProcessId')
+                    
+                    if cmd_line and CHROME_PROFILE_PATH.lower() in cmd_line.lower():
+                        print(f"  - Menghentikan proses PID {pid} yang menggunakan profile ini...")
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            except:
+                pass
 
-driver = webdriver.Chrome(options=options)
-driver.set_window_size(1280, 800)
+        # Hapus file lock jika masih ada setelah proses dihentikan
+        for filename in ["SingletonLock", "SingletonSocket", "DevToolsActivePort"]:
+            file_path = os.path.join(CHROME_PROFILE_PATH, filename)
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    print(f"  - Berhasil menghapus file lock: {filename}")
+                except:
+                    pass
+    except Exception as e:
+        print(f"  - Gagal melakukan cleanup: {e}")
 
-wait = WebDriverWait(driver, 15)
+def cleanup_other_main_instances():
+    """Menghentikan proses bot lain yang ID-nya tercatat di bot.pid"""
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            
+            if old_pid == os.getpid():
+                return
 
-today = datetime.now().strftime("%Y-%m-%d")
-screenshot_dir = os.path.join(os.path.dirname(__file__), today)
-os.makedirs(screenshot_dir, exist_ok=True)
+            print(f"\n[Cleanup] Menutup instance bot lama (PID {old_pid})...")
+            # Gunakan taskkill untuk memastikan proses mati
+            subprocess.run(["taskkill", "/F", "/PID", str(old_pid)], capture_output=True)
+            time.sleep(1)
+        except (ValueError, ProcessLookupError, Exception):
+            pass
+
+def save_current_pid():
+    """Mencatat PID proses saat ini ke file"""
+    try:
+        with open(PID_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+    except Exception as e:
+        print(f"Gagal mencatat PID: {e}")
+
+def init_driver():
+    global driver, wait, screenshot_dir
+    
+    print("\n[Init] Menyiapkan browser...")
+    cleanup_browser_process()
+    
+    options = Options()
+    if CHROME_PROFILE_PATH:
+        options.add_argument(f"--user-data-dir={CHROME_PROFILE_PATH}")
+    
+    # Flags untuk meningkatkan stabilitas dan mencegah crash
+    options.add_argument("--mute-audio")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    
+    brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+    if not os.path.exists(brave_path):
+        raise Exception(f"Brave Browser tidak ditemukan di lokasi: {brave_path}")
+    
+    options.binary_location = brave_path
+
+    if HEADLESS_MODE:
+        options.add_argument("--headless=new")
+
+    try:
+        driver = webdriver.Chrome(options=options)
+        driver.set_window_size(1280, 800)
+        wait = WebDriverWait(driver, 15)
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        screenshot_dir = os.path.join(os.path.dirname(__file__), today)
+        os.makedirs(screenshot_dir, exist_ok=True)
+        print("  - Browser siap!")
+    except Exception as e:
+        print(f"  - CRITICAL ERROR saat init driver: {e}")
+        cleanup_browser_process() # Cleanup jika gagal ditengah jalan
+        raise e
 
 def get_platform(url):
     """Determine platform from URL"""
@@ -472,92 +576,341 @@ def upload_proof_and_submit(task_link, screenshot_path):
     except Exception as e:
         print(f"  - Submit error: {e}")
 
-# ============ MAIN FLOW ============
-driver.get("https://admin.sistem-partisipasi.jovasoftware.id/dashboard")
-
-try:
-    email_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type="email"]')))
-    email_input.send_keys(EMAIL)
-
-    password_input = driver.find_element(By.CSS_SELECTOR, 'input[type="password"]')
-    password_input.send_keys(PASSWORD)
-
-    submit_button = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-    submit_button.click()
-
-    wait.until(EC.url_changes(driver.current_url))
-    print("Login successful!")
-except:
-    print("Already logged in or login failed")
-
-wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.rdt_TableBody')))
-
-# Get all task detail links
-rows = driver.find_elements(By.CSS_SELECTOR, '.rdt_TableRow')
-task_links = []
-for row in rows:
-    link = row.find_element(By.CSS_SELECTOR, '[data-column-id="8"] a').get_attribute('href')
-    task_links.append(link)
-
-print(f"\nFound {len(task_links)} tasks to process\n")
-
-task_data = {}
-
-for i, task_link in enumerate(task_links, 1):
-    print(f"=== Processing Task {i} ===")
+def send_telegram_album(task_data):
+    """Kirim semua screenshot ke Telegram sebagai satu album"""
+    print("\n[Telegram] Mengirim album screenshot...")
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMediaGroup"
+    
+    media = []
+    files = {}
+    
+    for i, data in task_data.items():
+        file_path = data['screenshot']
+        file_name = os.path.basename(file_path)
+        media.append({
+            "type": "photo",
+            "media": f"attach://{file_name}"
+        })
+        files[file_name] = open(file_path, 'rb')
 
     try:
-        driver.get(task_link)
-        time.sleep(2)
-
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.prose')))
-
-        description_el = driver.find_element(By.CSS_SELECTOR, '.prose')
-        urls = extract_urls_from_description(description_el)
-
-        if not urls:
-            print(f"  No URLs found in task description")
-            continue
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "media": json.dumps(media)
+        }
+        res = requests.post(url, data=payload, files=files, timeout=60)
+        res_json = res.json()
+        if res_json.get("ok"):
+            print("  - Berhasil mengirim foto.")
+        else:
+            print(f"  - Gagal kirim foto: {res_json}")
+    except requests.exceptions.Timeout:
+        print("  - Request Timeout (RTO) saat mengirim foto! Mungkin koneksi lambat.")
     except Exception as e:
-        print(f"  ❌ Error loading task {i}: {type(e).__name__}: {str(e)[:100]}")
-        print(f"  Skipping to next task...")
-        continue
+        print(f"  - Error API Telegram: {e}")
+    finally:
+        for f in files.values():
+            f.close()
 
-    print(f"  Found URLs: {urls}")
+def wait_for_telegram_confirmation(max_wait_seconds=300):
+    """Kirim pesan validasi dan nge-block sampai di-klik pengguna atau timeout (via getUpdates)"""
+    print(f"\n[Telegram] Menunggu konfirmasi Anda via tombol (Timeout: {max_wait_seconds}s)...")
+    
+    # 1. Kirim Pesan Validasi
+    url_send = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Confirm Semua", "callback_data": "confirm"},
+                {"text": "❌ Batal", "callback_data": "cancel"}
+            ]
+        ]
+    }
+    
+    message_id = None
+    try:
+        req_msg = requests.post(url_send, json={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": f"Semua eksekusi sosial media selesai ✅\nSilakan cek foto di atas.\n\nLanjut Upload & Submit? (Timeout dlm {max_wait_seconds/60:.1f} mnt)",
+            "reply_markup": keyboard
+        }, timeout=20)
+        message_id = req_msg.json().get("result", {}).get("message_id")
+    except Exception as e:
+        print(f"  - Error kirim tombol validasi: {e}")
+        return False
+        
+    # 2. Polling menunggu CallbackQuery
+    offset = None
+    url_updates = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+    
+    start_time = time.time()
+    last_print_time = start_time
+    
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed > max_wait_seconds:
+            print(f"\n[Telegram] Tidak ada respons dalam {max_wait_seconds} detik. Timeout (Batal otomatis).")
+            if message_id:
+                try:
+                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText", 
+                        json={
+                            "chat_id": TELEGRAM_CHAT_ID, 
+                            "message_id": message_id,
+                            "text": "⏳ *WAKTU HABIS* - Tidak ada konfirmasi dari pengguna.\nStatus: ❌ **DIBATALKAN OTOMATIS**",
+                            "parse_mode": "Markdown"
+                        }, timeout=10)
+                except: pass
+            return False
 
-    for url in urls:
-        platform = get_platform(url)
-        print(f"  Platform: {platform}")
+        # Print progress tiap 60 detik biar tidak dikira stuck
+        if time.time() - last_print_time > 60:
+            print(f"  - Masih menunggu konfirmasi Telegram... (Sisa waktu: {int(max_wait_seconds - elapsed)}s)")
+            last_print_time = time.time()
 
         try:
-            if platform == 'tiktok':
-                do_tiktok_task(url)
-            elif platform == 'instagram':
-                do_instagram_task(url)
-            elif platform == 'youtube':
-                do_youtube_task(url)
-            else:
-                print(f"  Unknown platform for URL: {url}")
-                print("Platform not social media, skipping...")
-                break
-
-            screenshot_path = take_screenshot(i)
-            task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
+            params = {"timeout": 30}
+            if offset:
+                params["offset"] = offset
+            
+            # Timeout RTO python ditambahin supaya tidak freeze
+            res = requests.get(url_updates, params=params, timeout=35)
+            data = res.json()
+            
+            if data.get("ok") and data.get("result"):
+                for update in data["result"]:
+                    offset = update["update_id"] + 1
+                    
+                    if "callback_query" in update:
+                        cb = update["callback_query"]
+                        cb_data = cb.get("data")
+                        cb_id = cb.get("id")
+                        
+                        # Tutup status loading di aplikasi Telegram
+                        try:
+                            requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", 
+                                      json={"callback_query_id": cb_id}, timeout=10)
+                        except: pass
+                        
+                        if message_id:
+                            status_text = "✅ **DIKONFIRMASI** - Memulai proses upload..." if cb_data == "confirm" else "❌ **DIBATALKAN**"
+                            new_text = f"Semua eksekusi sosial media selesai ✅\n\nStatus: {status_text}"
+                            
+                            try:
+                                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText", 
+                                              json={
+                                                  "chat_id": TELEGRAM_CHAT_ID, 
+                                                  "message_id": message_id,
+                                                  "text": new_text,
+                                                  "parse_mode": "Markdown"
+                                              }, timeout=10)
+                            except: pass
+                        
+                        if cb_data == "confirm":
+                            print("\n  - Respons Telegram: ✅ CONFIRM")
+                            return True
+                        elif cb_data == "cancel":
+                            print("\n  - Respons Telegram: ❌ CANCEL")
+                            return False
+                            
+            time.sleep(2) # Refresh polling
+        except requests.exceptions.Timeout:
+            # Hanya nge-print kalau dev butuh debug, atau abaikan untuk log bersih:
+            # print("  - RTO polling Telegram (ini wajar), retrying...")
+            pass
+        except requests.exceptions.RequestException as e:
+            print(f"  - Request error (RTO dll), retrying... {e}")
+            time.sleep(5)
         except Exception as e:
-            print(f"  ❌ Error processing task {i}: {type(e).__name__}: {str(e)[:100]}")
-            print(f"  Skipping to next task...")
-            continue
+            print(f"  - Error saat nge-pull chat: {e}")
+            time.sleep(5)
 
-print("\n=== All social media tasks completed! ===")
-print(f"Screenshots saved to: {screenshot_dir}")
-print(f"\nPlease check if all tasks are correct.")
-input("Press Enter to upload proofs to each task...")
+def run_automation(chat_id):
+    global driver, wait, screenshot_dir
+    try:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                      json={"chat_id": chat_id, "text": "⏳ Memulai browser dan mengambil task..."})
+        
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] === Memulai Otomatisasi (Chat: {chat_id}) ===")
+        init_driver()
 
-print("\n=== Uploading proofs ===")
-for task_num, data in task_data.items():
-    print(f"Uploading proof for Task {task_num}...")
-    upload_proof_and_submit(data['link'], data['screenshot'])
+        # ============ MAIN FLOW ============
+        driver.get("https://admin.sistem-partisipasi.jovasoftware.id/dashboard")
 
-print("\n=== All proofs uploaded and submitted! ===")
-input("Press Enter to close the browser...")
-driver.quit()
+        # ============ LOGIN / REDIRECT CHECK ============
+        print("  - Memeriksa status login...")
+        try:
+            # Tunggu salah satu muncul: input email (blm login) atau table dashboard (sdh login)
+            element = WebDriverWait(driver, 10).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, 'input[type="email"]') or 
+                         d.find_elements(By.CSS_SELECTOR, '.rdt_Table')
+            )
+            
+            if driver.find_elements(By.CSS_SELECTOR, 'input[type="email"]'):
+                print("  - Belum login, mencoba login...")
+                email_input = driver.find_element(By.CSS_SELECTOR, 'input[type="email"]')
+                email_input.send_keys(EMAIL)
+
+                password_input = driver.find_element(By.CSS_SELECTOR, 'input[type="password"]')
+                password_input.send_keys(PASSWORD)
+
+                submit_button = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+                submit_button.click()
+
+                wait.until(EC.url_changes(driver.current_url))
+                print("  - Login berhasil!")
+            else:
+                print("  - Sudah dalam keadaan login (Dashboard).")
+        except TimeoutException:
+            print("  - Timeout saat menunggu halaman login/dashboard.")
+            raise Exception("Halaman tidak merespon atau elemen tidak ditemukan.")
+
+        # Tunggu .rdt_Table (wrapper), bukan .rdt_TableBody (isi)
+        # Karena .rdt_TableBody tidak dirender jika data kosong
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.rdt_Table')))
+
+        # Get all task detail links
+        rows = driver.find_elements(By.CSS_SELECTOR, '.rdt_TableRow')
+        task_links = []
+        for row in rows:
+            link = row.find_element(By.CSS_SELECTOR, '[data-column-id="8"] a').get_attribute('href')
+            task_links.append(link)
+
+        print(f"\nFound {len(task_links)} tasks to process\n")
+        
+        if not task_links:
+             requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                          json={"chat_id": chat_id, "text": "✅ Tidak ada task yang ditemukan saat ini."})
+             return
+
+        task_data = {}
+
+        for i, task_link in enumerate(task_links, 1):
+            print(f"=== Processing Task {i} ===")
+
+            try:
+                driver.get(task_link)
+                time.sleep(2)
+
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.prose')))
+
+                description_el = driver.find_element(By.CSS_SELECTOR, '.prose')
+                urls = extract_urls_from_description(description_el)
+
+                if not urls:
+                    print(f"  No URLs found in task description")
+                    continue
+            except Exception as e:
+                print(f"  ❌ Error loading task {i}: {type(e).__name__}: {str(e)[:100]}")
+                print(f"  Skipping to next task...")
+                continue
+
+            print(f"  Found URLs: {urls}")
+
+            for url in urls:
+                platform = get_platform(url)
+                print(f"  Platform: {platform}")
+
+                try:
+                    if platform == 'tiktok':
+                        do_tiktok_task(url)
+                    elif platform == 'instagram':
+                        do_instagram_task(url)
+                    elif platform == 'youtube':
+                        do_youtube_task(url)
+                    else:
+                        print(f"  Unknown platform for URL: {url}")
+                        print("Platform not social media, skipping...")
+                        break
+
+                    screenshot_path = take_screenshot(i)
+                    task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
+                except Exception as e:
+                    print(f"  ❌ Error processing task {i}: {type(e).__name__}: {str(e)[:100]}")
+                    print(f"  Skipping to next task...")
+                    continue
+
+        print("\n=== Semua proses klik sosial media sudah selesai! ===")
+        print(f"Screenshots disimpan di folder: {screenshot_dir}")
+
+        # Kirim album ke telegram (jika ada file)
+        if task_data:
+            send_telegram_album(task_data)
+
+            # Tunggu Validasi
+            if wait_for_telegram_confirmation():
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                              json={"chat_id": chat_id, "text": "🚀 Memulai proses upload bukti screenshot..."})
+                
+                print("\n=== Mulai Mengunggah Bukti (Upload Proofs) ===")
+                for task_num, data in task_data.items():
+                    print(f"Upload untuk Task ke-{task_num}...")
+                    upload_proof_and_submit(data['link'], data['screenshot'])
+                print("\n=== Seluruh task sukses disubmit! ===")
+                
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                              json={"chat_id": chat_id, "text": "🎉 Seluruh task sukses dikerjakan dan disubmit!"})
+            else:
+                print("\n=== Proses Dibatalkan oleh Anda ❌ ===")
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                              json={"chat_id": chat_id, "text": "❌ Proses dibatalkan oleh pengguna (Timeout/Batal)."})
+        else:
+            print("\nTidak ada task yang ditemukan/berhasil diproses.")
+
+    except Exception as e:
+        print(f"\n[CRITICAL] Error pada run_automation: {type(e).__name__}: {e}")
+        # Pastikan browser benar-benar mati jika error terjadi di tengah jalan
+        cleanup_browser_process()
+        
+        err_msg = str(e)[:150]
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                      json={"chat_id": chat_id, "text": f"❌ **CRITICAL ERROR**\nOtomatisasi berhenti.\n\nDetail: `{err_msg}`\n\nSilakan coba lagi /run beberapa saat lagi."})
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
+            driver = None
+
+def listen_telegram_command():
+    print("🤖 Bot standby berjalan lokal... Menunggu perintah /run dari Telegram...")
+    if not TELEGRAM_BOT_TOKEN:
+        print("PERINGATAN: TELEGRAM_BOT_TOKEN tidak ditemukan di .env!")
+        return
+
+    offset = None
+    url_updates = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+    
+    while True:
+        try:
+            params = {"timeout": 30}
+            if offset:
+                params["offset"] = offset
+            
+            res = requests.get(url_updates, params=params, timeout=35)
+            data = res.json()
+            
+            if data.get("ok") and data.get("result"):
+                for update in data["result"]:
+                    offset = update["update_id"] + 1
+                    
+                    if "message" in update and "text" in update["message"]:
+                        chat_id = update["message"]["chat"]["id"]
+                        text = update["message"]["text"].strip().lower()
+                        
+                        if text == "/run":
+                            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Menerima perintah /run dari chat_id: {chat_id}")
+                            run_automation(chat_id)
+            
+            time.sleep(1)
+        except requests.exceptions.Timeout:
+            pass # Timeout wajar untuk long-polling
+        except Exception as e:
+            print(f"Error polling telegram: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    cleanup_other_main_instances()
+    save_current_pid()
+    print("\n[Main] Bot Listener Aktif...")
+    listen_telegram_command()
