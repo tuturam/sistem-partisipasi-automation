@@ -809,57 +809,123 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
                                    screenshot_path: str):
     """Upload screenshot ke task detail dan submit."""
     await tab.get(task_link)
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
-    # Tunggu .prose
+    # Tunggu .prose (halaman detail task)
     try:
-        await tab.select('.prose', timeout=10)
+        await tab.select('.prose', timeout=15)
     except Exception:
         pass
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
-    # Upload file
+    # Upload file — coba send_keys dulu, fallback ke CDP
     try:
         file_input = await tab.select('input[type="file"][accept="image/*"]', timeout=5)
         await file_input.send_keys(screenshot_path)
-        await asyncio.sleep(2)
-        print(f"  - Uploaded: {screenshot_path}")
+        await asyncio.sleep(3)
+        print(f"  - Uploaded: {os.path.basename(screenshot_path)}")
     except Exception as e:
-        print(f"  - Upload error: {e}")
-        return
+        # Fallback: lewat JS — set file input langsung
+        print(f"  - send_keys gagal: {e}, coba fallback CDP...")
+        try:
+            await tab.send("DOM.setFileInputFiles", {
+                "files": [screenshot_path],
+                "nodeId": await _get_file_input_node_id(tab),
+            })
+            await asyncio.sleep(2)
+            print(f"  - Uploaded via CDP: {os.path.basename(screenshot_path)}")
+        except Exception as e2:
+            print(f"  - Upload gagal total: {e2}")
+            return
 
-    # Scroll ke bawah
+    # Scroll ke bawah supaya tombol Submit kelihatan
     await tab.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     await asyncio.sleep(1)
 
-    # Click submit
+    # Click submit — pakai JS biar akurat (hindari dialog submit button)
     try:
-        btn = await tab.find("Submit", timeout=10)
-        # Pastikan bukan di dalam dialog expired
-        await btn.click()
+        # Tunggu tombol enabled + click via JS
+        result = await tab.evaluate("""
+            (() => {
+                // Cari button Submit di luar dialog
+                const btns = document.querySelectorAll('button');
+                for (const btn of btns) {
+                    if (btn.textContent.trim() === 'Submit' &&
+                        !btn.closest('#upload_reason_modal') &&
+                        !btn.disabled) {
+                        btn.click();
+                        return 'clicked';
+                    }
+                }
+                // Fallback: cari semua button Submit termasuk yg disabled
+                for (const btn of btns) {
+                    if (btn.textContent.trim() === 'Submit' &&
+                        !btn.closest('#upload_reason_modal')) {
+                        // Tunggu enabled dulu
+                        return 'disabled';
+                    }
+                }
+                return 'not-found';
+            })()
+        """)
+        print(f"  - Submit button: {result}")
+
+        if result == 'disabled':
+            # Polling sampai enabled
+            for _ in range(30):
+                still_disabled = await tab.evaluate("""
+                    (() => {
+                        const btns = document.querySelectorAll('button');
+                        for (const btn of btns) {
+                            if (btn.textContent.trim() === 'Submit' &&
+                                !btn.closest('#upload_reason_modal')) {
+                                if (!btn.disabled) { btn.click(); return false; }
+                                return true;
+                            }
+                        }
+                        return false;
+                    })()
+                """)
+                if not still_disabled:
+                    print("  - Submit clicked after wait")
+                    break
+                await asyncio.sleep(1)
+
         await asyncio.sleep(2)
-        print("  - Clicked submit")
 
         # Cek dialog expired
         try:
-            dialog = await tab.select('#upload_reason_modal', timeout=3)
+            dialog = await tab.select('#upload_reason_modal', timeout=4)
             if dialog:
                 print("  - Task expired dialog")
                 textarea = await dialog.select('textarea', timeout=2)
                 if textarea:
                     await textarea.send_keys("-")
                     await asyncio.sleep(1)
-                submit_btn = await dialog.find("Submit", timeout=2)
-                if submit_btn:
-                    await submit_btn.click()
-                    print("  - Submitted expired reason")
-                    await asyncio.sleep(2)
+                # Click Submit di dalam dialog
+                await tab.evaluate("""
+                    document.querySelector('#upload_reason_modal')
+                        ?.querySelector('button')?.click();
+                """)
+                print("  - Submitted expired reason")
+                await asyncio.sleep(2)
         except Exception:
             print("  - No expired dialog (on time)")
 
         print("  - Submitted successfully!")
     except Exception as e:
         print(f"  - Submit error: {e}")
+
+
+async def _get_file_input_node_id(tab: zd.Tab) -> int:
+    """Dapatkan nodeId dari file input element via CDP."""
+    result = await tab.send("DOM.getDocument")
+    root = result["root"]["nodeId"]
+    node = await tab.send("DOM.querySelector", {
+        "nodeId": root,
+        "selector": 'input[type="file"][accept="image/*"]',
+    })
+    return node["nodeId"]
 
 
 # ============================================================
