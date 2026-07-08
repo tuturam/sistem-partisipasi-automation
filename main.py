@@ -8,6 +8,7 @@ import signal
 import atexit
 import asyncio
 import json
+import random
 import requests
 import time
 import subprocess
@@ -778,6 +779,24 @@ async def do_youtube_task(tab: zd.Tab, url: str):
 #  SCREENSHOT + UPLOAD
 # ============================================================
 
+async def _wait_page_ready(tab: zd.Tab):
+    """Tunggu halaman selesai loading + random jeda 5-10 detik."""
+    # Tunggu readyState complete
+    for _ in range(30):  # max 15 detik
+        try:
+            ready = await tab.evaluate("document.readyState")
+            if ready == "complete":
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+
+    # Random jeda 5-10 detik biar animasi/render selesai
+    delay = random.uniform(5, 10)
+    print(f"  ⏳ Menunggu halaman selesai render... ({delay:.1f}s)")
+    await asyncio.sleep(delay)
+
+
 async def take_screenshot(tab: zd.Tab, task_number: int) -> str:
     filename = f"task_{task_number}.png"
     filepath = os.path.join(screenshot_dir, filename)
@@ -1115,6 +1134,7 @@ async def run_automation(chat_id: str):
                         print(f"  Unknown platform: {url} — skip")
                         break
 
+                    await _wait_page_ready(tab)
                     screenshot_path = await take_screenshot(tab, i)
                     task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
                 except Exception as e:
