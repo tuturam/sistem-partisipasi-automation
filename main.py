@@ -375,24 +375,25 @@ async def _switch_to_visible_and_wait(tab: zd.Tab, url: str, timeout: int = 300)
         url,
     ])
 
-    # Tunggu user tutup Brave (polling proses)
+    # Tunggu user tutup Brave (polling — cuma automation profile)
     start = time.time()
     while time.time() - start < timeout:
         await asyncio.sleep(2)
         try:
             result = subprocess.run(
                 ["powershell", "-Command",
-                 f"@(Get-CimInstance Win32_Process -Filter \"Name='brave.exe'\").Count"],
+                 f"@(Get-CimInstance Win32_Process -Filter \"Name='brave.exe'\" "
+                 f"| Where-Object {{ $_.CommandLine -match 'AutomationProfile' }}).Count"],
                 capture_output=True, text=True)
             count = int(result.stdout.strip() or "0")
             if count == 0:
-                print("    ✅ Brave ditutup — captcha harusnya solved")
+                print("    ✅ Brave automation profile ditutup — captcha harusnya solved")
                 return True
         except Exception:
             pass
         elapsed = int(time.time() - start)
         if elapsed % 30 == 0:
-            print(f"    ⏳ Menunggu Brave ditutup... ({elapsed}s)")
+            print(f"    ⏳ Menunggu Brave automation profile ditutup... ({elapsed}s)")
 
     print(f"    ❌ Timeout ({timeout}s) — user ga nutup Brave")
     # Kill visible Brave
