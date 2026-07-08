@@ -147,14 +147,45 @@ atexit.register(graceful_shutdown)
 
 def init_driver():
     global driver, wait, screenshot_dir, brave_process
-    
+
     print("\n[Init] Menyiapkan browser...")
-    cleanup_browser_process()
-    
+
+    # Cek apakah profile sedang dipake oleh Brave lain (user manual)
+    profile_in_use = False
+    if CHROME_PROFILE_PATH:
+        try:
+            ps_cmd = 'Get-CimInstance Win32_Process -Filter "Name = \'brave.exe\'" | Select-Object ProcessId, CommandLine | ConvertTo-Json'
+            result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
+            if result.stdout.strip():
+                data = json.loads(result.stdout)
+                processes = data if isinstance(data, list) else [data]
+                for proc in processes:
+                    cmd_line = proc.get('CommandLine', '') or ''
+                    if cmd_line and CHROME_PROFILE_PATH.lower() in cmd_line.lower():
+                        profile_in_use = True
+                        break
+        except Exception:
+            pass
+
+    if profile_in_use:
+        print("  ⚠️ Brave sedang berjalan dengan profile ini.")
+        print("  ⚠️ TUTUP Brave terlebih dahulu agar cookies tersimpan ke disk.")
+        print("  ⚠️ Kalau tidak ditutup, verifikasi/cookies bisa hilang!")
+        print("  ⏳ Menunggu 10 detik... (Ctrl+C untuk batal)")
+        time.sleep(10)
+        # Clean lock files dari session sebelumnya
+        for lock in ["SingletonLock", "SingletonSocket", "Lockfile", "DevToolsActivePort"]:
+            lp = os.path.join(CHROME_PROFILE_PATH, lock)
+            if os.path.exists(lp):
+                try:
+                    os.remove(lp)
+                except Exception:
+                    pass
+
     options = Options()
     if CHROME_PROFILE_PATH:
         options.add_argument(f"--user-data-dir={CHROME_PROFILE_PATH}")
-    
+
     # Flags untuk meningkatkan stabilitas dan mencegah crash
     options.add_argument("--mute-audio")
     options.add_argument("--no-sandbox")
@@ -164,11 +195,11 @@ def init_driver():
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
-    
+
     brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
     if not os.path.exists(brave_path):
         raise Exception(f"Brave Browser tidak ditemukan di lokasi: {brave_path}")
-    
+
     options.binary_location = brave_path
 
     if HEADLESS_MODE:
@@ -195,7 +226,15 @@ def init_driver():
         print("  - Browser siap!")
     except Exception as e:
         print(f"  - CRITICAL ERROR saat init driver: {e}")
-        cleanup_browser_process() # Cleanup jika gagal ditengah jalan
+        # Clean lock files saja, jangan kill process
+        if CHROME_PROFILE_PATH:
+            for lock in ["SingletonLock", "SingletonSocket", "DevToolsActivePort"]:
+                lp = os.path.join(CHROME_PROFILE_PATH, lock)
+                if os.path.exists(lp):
+                    try:
+                        os.remove(lp)
+                    except Exception:
+                        pass
         raise e
 
 def get_platform(url):
@@ -1153,8 +1192,15 @@ def run_automation(chat_id):
 
     except Exception as e:
         print(f"\n[CRITICAL] Error pada run_automation: {type(e).__name__}: {e}")
-        # Pastikan browser benar-benar mati jika error terjadi di tengah jalan
-        cleanup_browser_process()
+        # Bersihin lock files biar profile bisa dibuka manual next time
+        if CHROME_PROFILE_PATH:
+            for lock in ["SingletonLock", "SingletonSocket", "DevToolsActivePort"]:
+                lp = os.path.join(CHROME_PROFILE_PATH, lock)
+                if os.path.exists(lp):
+                    try:
+                        os.remove(lp)
+                    except Exception:
+                        pass
         
         err_msg = str(e)[:150]
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
