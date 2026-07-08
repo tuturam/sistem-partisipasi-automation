@@ -835,13 +835,12 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
             """)
             await asyncio.sleep(0.3)
 
-            # Cari via CDP
+            # Cari via CDP (zendriver pake **kwargs, bukan dict)
             try:
-                doc = await tab.send("DOM.getDocument", {"depth": 0})
-                node = await tab.send("DOM.querySelector", {
-                    "nodeId": doc["root"]["nodeId"],
-                    "selector": '[data-zd-upload="1"]',
-                })
+                doc = await tab.send("DOM.getDocument", depth=0)
+                node = await tab.send("DOM.querySelector",
+                                      nodeId=doc["root"]["nodeId"],
+                                      selector='[data-zd-upload="1"]')
                 node_id = node.get("nodeId")
             except Exception as cdp_err:
                 print(f"    CDP query gagal: {cdp_err}")
@@ -855,10 +854,9 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
 
             # Set file via CDP
             try:
-                await tab.send("DOM.setFileInputFiles", {
-                    "files": [abs_path],
-                    "nodeId": node_id,
-                })
+                await tab.send("DOM.setFileInputFiles",
+                               files=[abs_path],
+                               nodeId=node_id)
             except Exception as setf_err:
                 print(f"    DOM.setFileInputFiles error: {setf_err}")
                 continue
