@@ -1117,14 +1117,20 @@ async def run_automation(chat_id: str):
         except Exception:
             print("  - Sudah login (email field tidak ditemukan).")
 
-        # Tunggu table
+        # Tunggu table + data ready (AJAX loading)
         try:
             await tab.select('.rdt_Table', timeout=15)
         except Exception:
             raise Exception("Dashboard table tidak muncul — login gagal?")
+        # Tunggu data rows muncul (react-datatable render async)
+        await asyncio.sleep(3)
+        for _ in range(10):  # retry kalo masih kosong
+            rows = await tab.select_all('.rdt_TableRow')
+            if rows:
+                break
+            await asyncio.sleep(1)
 
         # Ambil task links
-        rows = await tab.select_all('.rdt_TableRow')
         task_links = []
         BASE = "https://admin.sistem-partisipasi.jovasoftware.id"
         for row in rows:
@@ -1155,17 +1161,23 @@ async def run_automation(chat_id: str):
 
             try:
                 await tab.get(task_link)
-                await asyncio.sleep(2)
+                await asyncio.sleep(3)
 
+                # Tunggu konten muncul
                 try:
                     await tab.select('.prose', timeout=10)
                 except Exception:
                     pass
+                await asyncio.sleep(2)  # tunggu render react
 
                 # Extract URLs from description
                 urls = []
                 try:
                     link_els = await tab.select_all('.prose a')
+                    if not link_els:
+                        # Retry — mungkin masih loading
+                        await asyncio.sleep(2)
+                        link_els = await tab.select_all('.prose a')
                     for el in link_els:
                         href = el.attrs.get('href', '')
                         if href:
