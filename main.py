@@ -914,12 +914,16 @@ async def run_automation(chat_id: str):
         # Ambil task links
         rows = await tab.select_all('.rdt_TableRow')
         task_links = []
+        BASE = "https://admin.sistem-partisipasi.jovasoftware.id"
         for row in rows:
             try:
                 link_el = await row.query_selector('[data-column-id="8"] a')
                 if link_el:
                     href = link_el.attrs.get('href', '')
                     if href:
+                        # Resolve relative URL → absolute
+                        if href.startswith('/'):
+                            href = BASE + href
                         task_links.append(href)
             except Exception:
                 pass
@@ -953,6 +957,9 @@ async def run_automation(chat_id: str):
                     for el in link_els:
                         href = el.attrs.get('href', '')
                         if href:
+                            # Resolve relative URLs
+                            if href.startswith('/'):
+                                href = BASE + href
                             urls.append(href)
                 except Exception:
                     pass
