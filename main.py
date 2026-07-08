@@ -1251,6 +1251,34 @@ def listen_telegram_command():
             time.sleep(5)
 
 if __name__ == "__main__":
+    # Bersihin zombie Brave dari run sebelumnya (sebelum user punya session)
+    print("[Main] Membersihkan proses Brave zombie...")
+    try:
+        ps_cmd = 'Get-CimInstance Win32_Process -Filter "Name = \'brave.exe\'" | Select-Object ProcessId | ConvertTo-Json'
+        result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
+        if result.stdout.strip():
+            data = json.loads(result.stdout)
+            processes = data if isinstance(data, list) else [data]
+            killed = 0
+            for proc in processes:
+                pid = proc.get('ProcessId')
+                if pid:
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+                    killed += 1
+            if killed:
+                print(f"  - {killed} proses Brave zombie dibersihkan")
+    except Exception:
+        pass
+    # Bersihin lock files
+    if CHROME_PROFILE_PATH:
+        for lock in ["SingletonLock", "SingletonSocket", "DevToolsActivePort"]:
+            lp = os.path.join(CHROME_PROFILE_PATH, lock)
+            if os.path.exists(lp):
+                try:
+                    os.remove(lp)
+                except Exception:
+                    pass
+
     cleanup_other_main_instances()
     save_current_pid()
     print("\n[Main] Bot Listener Aktif...")
