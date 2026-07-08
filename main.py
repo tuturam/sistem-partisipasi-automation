@@ -166,7 +166,13 @@ async def init_browser() -> tuple[zd.Browser, zd.Tab]:
     ]
 
     if HEADLESS_MODE:
-        browser_args.append("--headless=new")
+        browser_args.extend([
+            "--headless=new",
+            "--window-size=1920,1080",
+            # Anti-headless-detection
+            "--disable-features=HeadlessChrome",
+            "--lang=en-US",
+        ])
 
     print(f"  - Brave binary: {brave_path}")
     print(f"  - Profile: {CHROME_PROFILE_PATH}")
@@ -355,11 +361,22 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         print("  [TikTok] Pre-warming session...")
         await tab.get("https://www.tiktok.com/")
         await asyncio.sleep(4)
-        # Cek apakah kena captcha/block saat pre-warm
         warm_block = await _detect_tiktok_block(tab)
         if warm_block:
             print(f"  ⚠️ TikTok pre-warm kena {warm_block}!")
-            print("  ⚠️ Session belum verified. Buka Brave manual dulu, solve captcha, tutup, lalu /run lagi.")
+            if HEADLESS_MODE:
+                raise Exception(
+                    "TikTok session belum verified! "
+                    "Buka Brave automation profile manual: ./open_brave_auto.bat\n"
+                    "Login/solve captcha di TikTok, lalu tutup Brave.\n"
+                    "Setelah itu /run lagi dari Telegram."
+                )
+            else:
+                print("  ⚠️ Solve captcha di jendela Brave sekarang...")
+                if await _wait_for_captcha_solve(tab):
+                    print("  [TikTok] Pre-warm OK — verified manual")
+                else:
+                    print("  ⚠️ Pre-warm timeout — lanjut aja (mungkin task URL tetap bisa)")
         else:
             print("  [TikTok] Pre-warm OK — session verified")
         _tiktok_prewarmed = True
