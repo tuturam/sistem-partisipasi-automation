@@ -829,20 +829,24 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
         'input[type="file"]',
     ]:
         try:
-            # Tag element dengan attribute unik
+            # Tag element dengan attribute unik (IIFE biar ga leak variable)
             await tab.evaluate(f"""
-                const el = document.querySelector('{sel}');
-                if (el) el.setAttribute('data-zd-upload', '1');
+                (() => {{ const e = document.querySelector('{sel}'); if (e) e.setAttribute('data-zd-upload', '1'); }})()
             """)
             await asyncio.sleep(0.3)
 
             # Cari via CDP
-            doc = await tab.send("DOM.getDocument", {"depth": 0})
-            node = await tab.send("DOM.querySelector", {
-                "nodeId": doc["root"]["nodeId"],
-                "selector": '[data-zd-upload="1"]',
-            })
-            node_id = node.get("nodeId")
+            try:
+                doc = await tab.send("DOM.getDocument", {"depth": 0})
+                node = await tab.send("DOM.querySelector", {
+                    "nodeId": doc["root"]["nodeId"],
+                    "selector": '[data-zd-upload="1"]',
+                })
+                node_id = node.get("nodeId")
+            except Exception as cdp_err:
+                print(f"    CDP query gagal: {cdp_err}")
+                continue
+
             if not node_id or node_id == 0:
                 print(f"    nodeId=0 untuk '{sel}', skip")
                 continue
@@ -850,33 +854,32 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
             print(f"    CDP nodeId={node_id} untuk '{sel}'")
 
             # Set file via CDP
-            await tab.send("DOM.setFileInputFiles", {
-                "files": [abs_path],
-                "nodeId": node_id,
-            })
+            try:
+                await tab.send("DOM.setFileInputFiles", {
+                    "files": [abs_path],
+                    "nodeId": node_id,
+                })
+            except Exception as setf_err:
+                print(f"    DOM.setFileInputFiles error: {setf_err}")
+                continue
             await asyncio.sleep(2)
 
-            # Verifikasi
+            # Verifikasi (IIFE)
             file_count = await tab.evaluate("""
-                (() => {
-                    const el = document.querySelector('input[type="file"]');
-                    return el?.files?.length || 0;
-                })()
+                (() => { const f = document.querySelector('input[type=\"file\"]'); return f?.files?.length || 0; })()
             """)
             if file_count > 0:
                 print(f"  ✅ Upload OK ({file_count} file)")
                 uploaded = True
                 break
             else:
-                print(f"    CDP setFileInputFiles OK tapi files.length={file_count}")
-                # Coba lagi dengan dispatch change event
+                print(f"    files.length={file_count}, dispatch change event...")
                 await tab.evaluate("""
-                    const el = document.querySelector('input[type="file"]');
-                    if (el) el.dispatchEvent(new Event('change', {bubbles: true}));
+                    (() => { const e = document.querySelector('input[type=\"file\"]'); if (e) e.dispatchEvent(new Event('change', {bubbles: true})); })()
                 """)
                 await asyncio.sleep(1)
                 file_count2 = await tab.evaluate(
-                    "document.querySelector('input[type=\"file\"]')?.files?.length || 0")
+                    "(document.querySelector('input[type=\"file\"]')?.files?.length) || 0")
                 if file_count2 > 0:
                     print(f"  ✅ Upload OK setelah change event ({file_count2} file)")
                     uploaded = True
@@ -887,8 +890,7 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
             continue
 
     if not uploaded:
-        print("  ❌ Upload GAGAL — semua metode gagal")
-        return
+        raise Exception("Upload GAGAL — file input tidak ditemukan atau semua metode upload gagal")
 
     # === CLICK SUBMIT ===
     await tab.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -1301,14 +1303,25 @@ async def run_automation(chat_id: str):
                                   json={"chat_id": chat_id, "text": "🚀 Memulai upload bukti..."})
 
                 print("\n=== Upload Bukti ===")
+                failed_tasks = []
                 for task_num, data in task_data.items():
                     print(f"Upload Task {task_num}...")
-                    await upload_proof_and_submit(tab, data['link'], data['screenshot'])
-                print("\n=== Semua task sukses disubmit! ===")
+                    try:
+                        await upload_proof_and_submit(tab, data['link'], data['screenshot'])
+                    except Exception as upload_err:
+                        print(f"  ❌ Task {task_num} upload gagal: {upload_err}")
+                        failed_tasks.append(task_num)
+
+                if failed_tasks:
+                    msg = f"⚠️ Upload selesai — {len(failed_tasks)}/{len(task_data)} gagal.\nGagal: Task {failed_tasks}"
+                    print(f"\n=== {msg} ===")
+                else:
+                    msg = "🎉 Semua task sukses disubmit!"
+                    print(f"\n=== {msg} ===")
 
                 if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
                     requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                                  json={"chat_id": chat_id, "text": "🎉 Semua task selesai!"})
+                                  json={"chat_id": chat_id, "text": msg})
             else:
                 print("\n=== Dibatalkan ❌ ===")
                 if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
