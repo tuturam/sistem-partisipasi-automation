@@ -807,173 +807,193 @@ async def take_screenshot(tab: zd.Tab, task_number: int) -> str:
 
 async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
                                    screenshot_path: str):
-    """Upload screenshot ke task detail dan submit — via CDP DOM API."""
-    await tab.get(task_link)
-    await asyncio.sleep(3)
+    """Upload screenshot ke task detail dan submit — CDP murni."""
+    abs_path = os.path.abspath(screenshot_path)
+    print(f"  [Upload] File: {abs_path}")
 
-    # Tunggu .prose
+    await tab.get(task_link)
+    await asyncio.sleep(4)
+
+    # Tunggu halaman render
     try:
         await tab.select('.prose', timeout=15)
     except Exception:
         pass
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
-    # === UPLOAD FILE (CDP DOM.setFileInputFiles — primary) ===
+    # === UPLOAD via CDP DOM langsung (skip zendriver element API) ===
     uploaded = False
-    upload_selectors = [
+    for sel in [
         'input[type="file"][accept="image/*"]',
         'input[type="file"]',
-    ]
-    for sel in upload_selectors:
+    ]:
         try:
-            file_input = await tab.select(sel, timeout=5)
-            if file_input:
-                # Coba send_keys dulu
-                try:
-                    await file_input.send_keys(screenshot_path)
-                    await asyncio.sleep(2)
-                    # Verifikasi: cek apakah file ter-upload (ada file name di UI)
-                    has_file = await tab.evaluate("""
-                        (() => {
-                            const input = document.querySelector('input[type="file"]');
-                            return input && input.files && input.files.length > 0;
-                        })()
-                    """)
-                    if has_file:
-                        print(f"  - Uploaded: {os.path.basename(screenshot_path)}")
-                        uploaded = True
-                        break
-                    else:
-                        print("  - send_keys ok tapi file ga kedeteksi, coba CDP...")
-                except Exception as e:
-                    print(f"  - send_keys gagal: {e}, coba CDP...")
+            # Tag element dengan attribute unik
+            await tab.evaluate(f"""
+                const el = document.querySelector('{sel}');
+                if (el) el.setAttribute('data-zd-upload', '1');
+            """)
+            await asyncio.sleep(0.3)
 
-                # Fallback CDP
-                try:
-                    # Dapatkan nodeId dari file input
-                    doc = await tab.send("DOM.getDocument", {"depth": 0})
-                    root_node = doc["root"]["nodeId"]
-                    node = await tab.send("DOM.querySelector", {
-                        "nodeId": root_node,
-                        "selector": sel,
-                    })
-                    await tab.send("DOM.setFileInputFiles", {
-                        "files": [os.path.abspath(screenshot_path)],
-                        "nodeId": node["nodeId"],
-                    })
-                    await asyncio.sleep(2)
-                    print(f"  - Uploaded via CDP: {os.path.basename(screenshot_path)}")
+            # Cari via CDP
+            doc = await tab.send("DOM.getDocument", {"depth": 0})
+            node = await tab.send("DOM.querySelector", {
+                "nodeId": doc["root"]["nodeId"],
+                "selector": '[data-zd-upload="1"]',
+            })
+            node_id = node.get("nodeId")
+            if not node_id or node_id == 0:
+                print(f"    nodeId=0 untuk '{sel}', skip")
+                continue
+
+            print(f"    CDP nodeId={node_id} untuk '{sel}'")
+
+            # Set file via CDP
+            await tab.send("DOM.setFileInputFiles", {
+                "files": [abs_path],
+                "nodeId": node_id,
+            })
+            await asyncio.sleep(2)
+
+            # Verifikasi
+            file_count = await tab.evaluate("""
+                (() => {
+                    const el = document.querySelector('input[type="file"]');
+                    return el?.files?.length || 0;
+                })()
+            """)
+            if file_count > 0:
+                print(f"  ✅ Upload OK ({file_count} file)")
+                uploaded = True
+                break
+            else:
+                print(f"    CDP setFileInputFiles OK tapi files.length={file_count}")
+                # Coba lagi dengan dispatch change event
+                await tab.evaluate("""
+                    const el = document.querySelector('input[type="file"]');
+                    if (el) el.dispatchEvent(new Event('change', {bubbles: true}));
+                """)
+                await asyncio.sleep(1)
+                file_count2 = await tab.evaluate(
+                    "document.querySelector('input[type=\"file\"]')?.files?.length || 0")
+                if file_count2 > 0:
+                    print(f"  ✅ Upload OK setelah change event ({file_count2} file)")
                     uploaded = True
                     break
-                except Exception as e2:
-                    print(f"  - CDP upload juga gagal: {e2}")
-        except Exception:
+
+        except Exception as e:
+            print(f"    CDP error untuk '{sel}': {e}")
             continue
 
     if not uploaded:
-        print("  - ❌ Upload gagal — file input tidak ditemukan")
+        print("  ❌ Upload GAGAL — semua metode gagal")
         return
 
     # === CLICK SUBMIT ===
     await tab.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     await asyncio.sleep(1)
 
-    current_url = tab.url
-    try:
-        # JS click dengan React synthetic event support
-        click_result = await tab.evaluate("""
-            (() => {
-                const btns = document.querySelectorAll('button');
-                for (const btn of btns) {
-                    if (btn.textContent.trim() === 'Submit' &&
-                        !btn.closest('#upload_reason_modal')) {
-                        if (btn.disabled) return 'disabled';
-                        // Coba click native + React synthetic event
-                        btn.click();
-                        btn.dispatchEvent(new MouseEvent('click', {
-                            bubbles: true, cancelable: true
-                        }));
-                        btn.dispatchEvent(new Event('submit', {
-                            bubbles: true, cancelable: true
-                        }));
-                        return 'clicked';
-                    }
+    old_url = tab.url
+    print(f"  [Submit] Old URL: {old_url}")
+
+    # Cek tombol state
+    btn_info = await tab.evaluate("""
+        (() => {
+            const btns = [...document.querySelectorAll('button')]
+                .filter(b => b.textContent.trim() === 'Submit');
+            return btns.map(b => ({
+                text: b.textContent.trim(),
+                disabled: b.disabled,
+                inDialog: !!b.closest('#upload_reason_modal'),
+                visible: b.offsetParent !== null,
+            }));
+        })()
+    """)
+    print(f"  [Submit] Button states: {btn_info}")
+
+    # Click via JS dengan full event chain
+    click_ok = await tab.evaluate("""
+        (() => {
+            const btns = [...document.querySelectorAll('button')];
+            for (const btn of btns) {
+                if (btn.textContent.trim() === 'Submit' &&
+                    !btn.closest('#upload_reason_modal')) {
+                    if (btn.disabled) return 'disabled:' + btn.textContent;
+                    // Full event chain buat React
+                    btn.focus();
+                    btn.click();
+                    ['mousedown', 'mouseup', 'click', 'submit'].forEach(t => {
+                        btn.dispatchEvent(new Event(t, {bubbles: true, cancelable: true}));
+                    });
+                    // Juga submit parent form
+                    const form = btn.closest('form');
+                    if (form) form.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+                    return 'clicked';
                 }
-                return 'not-found';
-            })()
-        """)
-        print(f"  - Submit click: {click_result}")
+            }
+            return 'not-found';
+        })()
+    """)
+    print(f"  [Submit] Click result: {click_ok}")
 
-        if click_result == 'disabled':
-            # Tunggu tombol enabled (file upload selesai diproses)
-            for _ in range(30):
-                result = await tab.evaluate("""
-                    (() => {
-                        const btns = document.querySelectorAll('button');
-                        for (const btn of btns) {
-                            if (btn.textContent.trim() === 'Submit' &&
-                                !btn.closest('#upload_reason_modal')) {
-                                if (!btn.disabled) {
-                                    btn.click();
-                                    btn.dispatchEvent(new MouseEvent('click', {
-                                        bubbles: true, cancelable: true
-                                    }));
-                                    return 'clicked';
-                                }
-                                return 'disabled';
+    if 'disabled' in str(click_ok):
+        # Polling — tunggu enabled + click
+        for i in range(30):
+            await asyncio.sleep(1)
+            retry = await tab.evaluate("""
+                (() => {
+                    const btns = [...document.querySelectorAll('button')];
+                    for (const btn of btns) {
+                        if (btn.textContent.trim() === 'Submit' &&
+                            !btn.closest('#upload_reason_modal')) {
+                            if (!btn.disabled) {
+                                btn.click();
+                                ['click', 'submit'].forEach(t => {
+                                    btn.dispatchEvent(new Event(t, {bubbles: true, cancelable: true}));
+                                });
+                                return 'clicked';
                             }
+                            return 'still-disabled';
                         }
-                        return 'gone';
-                    })()
-                """)
-                if result == 'clicked':
-                    print("  - Submit clicked after wait")
-                    break
-                elif result == 'gone':
-                    print("  - Submit button hilang (mungkin udah ke-submit)")
-                    break
-                await asyncio.sleep(1)
+                    }
+                    return 'gone';
+                })()
+            """)
+            if retry == 'clicked':
+                print(f"  [Submit] Clicked after {i+1}s wait")
+                break
+            elif retry == 'gone':
+                print(f"  [Submit] Button gone — mungkin sudah submit")
+                break
 
-        await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
-        # Verifikasi: URL berubah = submit berhasil
-        new_url = tab.url
-        if new_url != current_url:
-            print(f"  - URL berubah — submit berhasil")
+    # Verifikasi URL berubah
+    new_url = tab.url
+    print(f"  [Submit] New URL: {new_url}")
+    if new_url != old_url:
+        print("  ✅ URL changed — submission successful")
 
-        # Cek dialog expired (muncul setelah submit)
-        try:
-            dialog = await tab.select('#upload_reason_modal', timeout=3)
-            if dialog:
-                print("  - Task expired dialog detected")
-                textarea = await dialog.select('textarea', timeout=2)
-                if textarea:
-                    await textarea.send_keys("-")
-                    await asyncio.sleep(0.5)
-                # Click submit dalam dialog
-                await tab.evaluate("""
-                    document.querySelector('#upload_reason_modal')
-                        ?.querySelector('button')?.click();
-                """)
-                await asyncio.sleep(2)
-                print("  - Expired reason submitted")
-        except Exception:
-            print("  - No expired dialog (submitted on time)")
+    # Cek dialog expired
+    try:
+        dialog = await tab.select('#upload_reason_modal', timeout=3)
+        if dialog:
+            print("  - Task expired dialog")
+            await dialog.select('textarea', timeout=2)
+            await tab.evaluate("""
+                const ta = document.querySelector('#upload_reason_modal textarea');
+                if (ta) { ta.value = '-'; ta.dispatchEvent(new Event('input', {bubbles: true})); }
+            """)
+            await asyncio.sleep(0.5)
+            await tab.evaluate("""
+                document.querySelector('#upload_reason_modal button')?.click();
+            """)
+            await asyncio.sleep(2)
+            print("  - Expired reason submitted")
+    except Exception:
+        pass
 
-        print("  ✅ Submitted!")
-    except Exception as e:
-        print(f"  ❌ Submit error: {e}")
-
-
-async def _get_file_input_node_id(tab: zd.Tab) -> int:
-    """Dapatkan nodeId dari file input element via CDP."""
-    result = await tab.send("DOM.getDocument")
-    root = result["root"]["nodeId"]
-    node = await tab.send("DOM.querySelector", {
-        "nodeId": root,
-        "selector": 'input[type="file"][accept="image/*"]',
-    })
-    return node["nodeId"]
+    print(f"  ✅ Done — {os.path.basename(screenshot_path)}")
 
 
 # ============================================================
