@@ -352,6 +352,76 @@ async def _wait_for_tiktok_content(tab: zd.Tab, timeout: int = 15) -> bool:
 _tiktok_prewarmed = False  # global flag — cuma warm sekali per session
 
 
+async def _switch_to_visible_and_wait(tab: zd.Tab, url: str, timeout: int = 300) -> bool:
+    """Stop headless browser, buka visible Brave, tunggu user solve captcha & tutup."""
+    global browser
+    print("    🖥️  Membuka Brave visible untuk solve captcha...")
+    print(f"    ⏳ Kamu punya {timeout}s untuk solve captcha di jendela Brave")
+    print("    💡 Tutup Brave setelah selesai solve")
+
+    # Stop headless
+    if browser:
+        try:
+            await browser.stop()
+        except Exception:
+            pass
+        browser = None
+
+    # Buka visible Brave
+    subprocess.Popen([
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+        f"--user-data-dir={CHROME_PROFILE_PATH}",
+        url,
+    ])
+
+    # Tunggu user tutup Brave (polling proses)
+    start = time.time()
+    while time.time() - start < timeout:
+        await asyncio.sleep(2)
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 f"@(Get-CimInstance Win32_Process -Filter \"Name='brave.exe'\").Count"],
+                capture_output=True, text=True)
+            count = int(result.stdout.strip() or "0")
+            if count == 0:
+                print("    ✅ Brave ditutup — captcha harusnya solved")
+                return True
+        except Exception:
+            pass
+        elapsed = int(time.time() - start)
+        if elapsed % 30 == 0:
+            print(f"    ⏳ Menunggu Brave ditutup... ({elapsed}s)")
+
+    print(f"    ❌ Timeout ({timeout}s) — user ga nutup Brave")
+    # Kill visible Brave
+    _kill_automation_profile_brave()
+    return False
+
+
+async def _restart_headless() -> zd.Tab:
+    """Restart browser dalam headless mode, return tab."""
+    global browser
+    brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+    browser = await zd.start(
+        browser_executable_path=brave_path,
+        user_data_dir=CHROME_PROFILE_PATH,
+        headless=True,
+        browser_args=[
+            "--mute-audio", "--no-sandbox", "--disable-dev-shm-usage",
+            "--disable-gpu", "--headless=new", "--window-size=1920,1080",
+            "--disable-features=HeadlessChrome", "--lang=en-US",
+        ],
+        disable_webrtc=True,
+        disable_webgl=True,
+    )
+    tab = browser.main_tab
+    await tab.set_window_size(1280, 800)
+    _clean_lock_files()
+    print("    🔒 Kembali ke headless mode")
+    return tab
+
+
 async def do_tiktok_task(tab: zd.Tab, url: str):
     """Follow + Like TikTok via zendriver CDP. Raise Exception kalo gagal total."""
     global _tiktok_prewarmed
@@ -365,18 +435,21 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         if warm_block:
             print(f"  ⚠️ TikTok pre-warm kena {warm_block}!")
             if HEADLESS_MODE:
-                raise Exception(
-                    "TikTok session belum verified! "
-                    "Buka Brave automation profile manual: ./open_brave_auto.bat\n"
-                    "Login/solve captcha di TikTok, lalu tutup Brave.\n"
-                    "Setelah itu /run lagi dari Telegram."
-                )
+                print("  🔓 Switching ke visible mode buat solve captcha...")
+                if not await _switch_to_visible_and_wait(tab, "https://www.tiktok.com/"):
+                    raise Exception(
+                        "TikTok session belum verified! "
+                        "Jalankan: python main.py --prewarm\n"
+                        "Login/solve captcha di TikTok, tutup Brave, lalu /run lagi."
+                    )
+                print("  ✅ Pre-warm verified — switch back to headless...")
+                tab = await _restart_headless()
             else:
                 print("  ⚠️ Solve captcha di jendela Brave sekarang...")
                 if await _wait_for_captcha_solve(tab):
-                    print("  [TikTok] Pre-warm OK — verified manual")
+                    print("  [TikTok] Pre-warm OK")
                 else:
-                    print("  ⚠️ Pre-warm timeout — lanjut aja (mungkin task URL tetap bisa)")
+                    print("  ⚠️ Pre-warm timeout — lanjut aja")
         else:
             print("  [TikTok] Pre-warm OK — session verified")
         _tiktok_prewarmed = True
@@ -392,13 +465,22 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         block = await _detect_tiktok_block(tab)
         if block == "captcha":
             print("  ⚠️ CAPTCHA terdeteksi!")
-            if not await _wait_for_captcha_solve(tab):
-                if attempt < 2:
-                    print("  ⏳ Retry setelah captcha timeout...")
-                    continue
-                raise Exception("TikTok CAPTCHA timeout")
-            await tab.get(url)
-            await asyncio.sleep(3)
+            if HEADLESS_MODE:
+                print("  🔓 Switch ke visible mode...")
+                if not await _switch_to_visible_and_wait(tab, url):
+                    if attempt < 2:
+                        continue
+                    raise Exception("TikTok CAPTCHA — user timeout")
+                tab = await _restart_headless()
+                await tab.get(url)
+                await asyncio.sleep(3)
+            else:
+                if not await _wait_for_captcha_solve(tab):
+                    if attempt < 2:
+                        continue
+                    raise Exception("TikTok CAPTCHA timeout")
+                await tab.get(url)
+                await asyncio.sleep(3)
 
         elif block == "login_required":
             raise Exception(
@@ -411,6 +493,15 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 backoff = (attempt + 1) * 15
                 print(f"  ❌ Access Denied / Rate Limited — tunggu {backoff}s...")
                 await asyncio.sleep(backoff)
+                continue
+            # Last attempt: coba switch ke visible
+            if HEADLESS_MODE:
+                print("  🔓 Retry terakhir — switch ke visible mode...")
+                if not await _switch_to_visible_and_wait(tab, url):
+                    raise Exception("TikTok tetap blokir — coba lagi nanti.")
+                tab = await _restart_headless()
+                await tab.get(url)
+                await asyncio.sleep(3)
                 continue
             raise Exception("TikTok blokir akses setelah 3x retry. Tunggu 30-60 menit.")
 
