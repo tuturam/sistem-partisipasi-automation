@@ -18,11 +18,24 @@ CHROME_PROFILE_PATH = os.getenv('CHROME_PROFILE_PATH')
 
 options = Options()
 options.add_argument(f"--user-data-dir={CHROME_PROFILE_PATH}")
+options.add_argument("--disable-blink-features=AutomationControlled")
+options.add_experimental_option("excludeSwitches", ["enable-automation"])
+options.add_experimental_option("useAutomationExtension", False)
 
 # options.add_argument(f"--headless=new")
 
 driver = webdriver.Chrome(options=options)
 driver.set_window_size(1280, 800)
+
+# --- Anti-detection: hide navigator.webdriver ---
+driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+    'source': '''
+        Object.defineProperty(navigator, "webdriver", {get: () => undefined});
+        Object.defineProperty(navigator, "plugins", {get: () => [1, 2, 3, 4, 5]});
+        Object.defineProperty(navigator, "languages", {get: () => ["en-US", "en"]});
+    '''
+})
+print("[Stealth] Anti-detection injected")
 
 wait = WebDriverWait(driver, 15)
 
@@ -47,54 +60,285 @@ def extract_urls_from_description(description_element):
     urls = [link.get_attribute('href') for link in links if link.get_attribute('href')]
     return urls
 
-def do_tiktok_task(url):
-    """Follow + Like on TikTok"""
-    driver.get(url)
-    time.sleep(3)
+# ============================================================
+#  TIKTOK HELPER: block detection + content verification
+# ============================================================
 
-    wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-    time.sleep(2)
-
+def _detect_tiktok_block():
+    """
+    Cek halaman TikTok saat ini — return tipe blok atau None (aman).
+    Prioritas urutan: captcha > login > access-denied > none.
+    """
     try:
-        captcha = driver.find_elements(By.ID, 'captcha-verify-container-main-page')
-        if captcha:
-            print("  - Captcha detected! Please solve it manually...")
-            WebDriverWait(driver, 300).until(
-                EC.invisibility_of_element_located((By.ID, 'captcha-verify-container-main-page'))
-            )
-            print("  - Captcha solved!")
-            time.sleep(2)
-    except:
+        body_text = driver.find_element(By.TAG_NAME, 'body').text.lower()
+    except Exception:
+        body_text = ""
+
+    # --- CAPTCHA (prioritas tertinggi, butuh manual solve) ---
+    captcha_selectors = [
+        "#captcha-verify-container-main-page",
+        "[id*='captcha']",
+        "[class*='captcha-verify']",
+        "[data-testid*='captcha']",
+        "#verify-ele",
+        "div[class*='verify']",
+    ]
+    for sel in captcha_selectors:
+        try:
+            el = driver.find_element(By.CSS_SELECTOR, sel)
+            if el.is_displayed():
+                return "captcha"
+        except Exception:
+            pass
+
+    # --- LOGIN REDIRECT ---
+    current_url = driver.current_url.lower()
+    if '/login' in current_url or '/signup' in current_url:
+        return "login_required"
+
+    login_input_selectors = [
+        'input[name="username"]',
+        'input[placeholder*="phone"]',
+        'input[placeholder*="email"]',
+        'input[placeholder*="user"]',
+    ]
+    for sel in login_input_selectors:
+        try:
+            el = driver.find_element(By.CSS_SELECTOR, sel)
+            if el.is_displayed():
+                return "login_required"
+        except Exception:
+            pass
+
+    # --- ACCESS DENIED / RATE LIMIT ---
+    denied_phrases = [
+        "access denied",
+        "too many requests",
+        "something went wrong",
+        "you are visiting our service too frequently",
+        "try again later",
+        "you've been temporarily blocked",
+        "verify you are human",
+    ]
+    for phrase in denied_phrases:
+        if phrase in body_text:
+            return "blocked"
+
+    page_title = driver.title.lower()
+    if "access denied" in page_title:
+        return "blocked"
+
+    return None
+
+
+def _wait_for_captcha_solve(timeout=300):
+    """Tunggu user solve captcha manual. Return True kalo solved, False kalo timeout."""
+    print("    ⏳ Menunggu Anda solve captcha...")
+    start = time.time()
+    last_log = start
+    while time.time() - start < timeout:
+        time.sleep(1)
+        status = _detect_tiktok_block()
+        if status != "captcha":
+            # Captcha mungkin hilang, tapi cek apakah yg muncul malah block lain
+            if status is None:
+                print("    ✅ Captcha solved!")
+                return True
+            elif status == "blocked":
+                print("    ❌ Captcha solved tapi muncul Access Denied")
+                return False
+        elapsed = int(time.time() - start)
+        if time.time() - last_log > 30:
+            remaining = timeout - elapsed
+            print(f"    ⏳ Masih menunggu... ({elapsed}s / {timeout}s, sisa {remaining}s)")
+            last_log = time.time()
+    print(f"    ❌ Timeout menunggu captcha ({timeout}s)")
+    return False
+
+
+def _wait_for_tiktok_content(timeout=15):
+    """
+    Konfirmasi halaman TikTok beneran render konten video.
+    Poll elemen khas TikTok; fallback ke body text length.
+    Return True kalo konten muncul, False kalo kosong/block.
+    """
+    content_selectors = [
+        '[data-e2e="follow-button"]',
+        '[data-e2e="unfollow-button"]',
+        '[data-e2e="like-icon"]',
+        '[data-e2e="unlike-icon"]',
+        '[data-e2e="video-title"]',
+        'video',
+    ]
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        # Cek dulu — jangan sampe yg muncul malah block screen
+        if _detect_tiktok_block() is not None:
+            return False
+
+        for sel in content_selectors:
+            try:
+                el = driver.find_element(By.CSS_SELECTOR, sel)
+                if el.is_displayed():
+                    return True
+            except Exception:
+                pass
+        time.sleep(0.5)
+
+    # Fallback: body text > 100 karakter = mungkin konten udah render
+    try:
+        body_text = driver.find_element(By.TAG_NAME, 'body').text.strip()
+        if len(body_text) > 100:
+            return True
+    except Exception:
         pass
 
-    try:
-        follow_btn = None
+    return False
+
+
+# ============================================================
+#  TIKTOK TASK (REWRITE)
+# ============================================================
+
+def do_tiktok_task(url):
+    """
+    Follow + Like pada halaman TikTok.
+    Deteksi blok sebelum interaksi. Retry 3x dengan backoff.
+    Raise Exception kalo gagal total (biar main loop catch & skip).
+    """
+    print(f"  [TikTok] Memproses: {url}")
+
+    for attempt in range(3):
+        print(f"  [TikTok] Attempt {attempt + 1}/3...")
+        driver.get(url)
+        time.sleep(4)
+
+        # === DETEKSI BLOK ===
+        block = _detect_tiktok_block()
+        if block == "captcha":
+            print("  ⚠️ CAPTCHA terdeteksi!")
+            if not _wait_for_captcha_solve():
+                if attempt < 2:
+                    print(f"  ⏳ Retry setelah captcha timeout...")
+                    continue
+                raise Exception("TikTok CAPTCHA timeout — butuh intervensi manual")
+            # Captcha solved, refresh page
+            driver.get(url)
+            time.sleep(3)
+
+        elif block == "login_required":
+            raise Exception(
+                "TikTok redirect ke halaman login — "
+                "session mungkin expired. Buka TikTok di browser profile "
+                "dan login ulang secara manual, lalu coba lagi."
+            )
+
+        elif block == "blocked":
+            if attempt < 2:
+                backoff = (attempt + 1) * 15
+                print(f"  ❌ Access Denied / Rate Limited")
+                print(f"  ⏳ Menunggu {backoff}s sebelum retry...")
+                time.sleep(backoff)
+                continue
+            raise Exception(
+                "TikTok terus memblokir akses setelah 3x retry. "
+                "Kemungkinan IP kena rate-limit. Tunggu 30-60 menit sebelum coba lagi."
+            )
+
+        # === VERIFIKASI KONTEN ===
+        if not _wait_for_tiktok_content():
+            if attempt < 2:
+                print("  ⚠️ Konten TikTok ga muncul — mungkin blokir silent")
+                time.sleep(10)
+                continue
+            raise Exception("TikTok konten video ga muncul setelah 3x retry")
+
+        # === FOLLOW ===
+        follow_done = False
+        # Cek apakah udah follow
         try:
-            # Try TikTok-specific data-e2e selector first
-            follow_btn = driver.find_element(By.CSS_SELECTOR, '[data-e2e="follow-button"]')
-        except:
-            try:
-                # Fallback to text-based XPath
-                follow_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Follow')]")
-            except:
-                pass
+            unfollow_btn = driver.find_element(By.CSS_SELECTOR, '[data-e2e="unfollow-button"]')
+            if unfollow_btn.is_displayed():
+                print("  - Follow: sudah di-follow sebelumnya")
+                follow_done = True
+        except Exception:
+            pass
 
-        if follow_btn and 'Following' not in follow_btn.text:
-            follow_btn.click()
-            time.sleep(1)
-            print("  - Followed!")
-    except:
-        print("  - Already following or follow button not found")
+        if not follow_done:
+            follow_btn = None
+            # Cari tombol follow
+            for sel, by_type in [
+                ('[data-e2e="follow-button"]', By.CSS_SELECTOR),
+                ('//button[contains(text(), "Follow")]', By.XPATH),
+                ('button[class*="follow"]:not([class*="unfollow"])', By.CSS_SELECTOR),
+            ]:
+                try:
+                    els = driver.find_elements(by_type, sel)
+                    for btn in els:
+                        if btn.is_displayed():
+                            text = btn.text.lower()
+                            if 'following' not in text:
+                                follow_btn = btn
+                                break
+                    if follow_btn:
+                        break
+                except Exception:
+                    pass
 
-    try:
-        like_btn = driver.find_element(By.CSS_SELECTOR, '[data-e2e="like-icon"]')
-        like_btn.click()
-        time.sleep(1)
-        print("  - Liked!")
-    except:
-        print("  - Already liked or like button not found")
+            if follow_btn:
+                driver.execute_script("arguments[0].scrollIntoView(true);", follow_btn)
+                time.sleep(0.5)
+                follow_btn.click()
+                time.sleep(1.5)
+                print("  - Follow: ✅ berhasil")
+            else:
+                print("  - Follow: tombol tidak ditemukan (mungkin private/bug akun)")
 
-    time.sleep(2)
+        # === LIKE ===
+        like_done = False
+        # Cek apakah udah like
+        try:
+            unlike_btn = driver.find_element(By.CSS_SELECTOR, '[data-e2e="unlike-icon"]')
+            if unlike_btn.is_displayed():
+                print("  - Like: sudah di-like sebelumnya")
+                like_done = True
+        except Exception:
+            pass
+
+        if not like_done:
+            like_btn = None
+            for sel in [
+                '[data-e2e="like-icon"]',
+                'button[aria-label*="Like"]',
+                '[class*="like-button"]',
+            ]:
+                try:
+                    els = driver.find_elements(By.CSS_SELECTOR, sel)
+                    for btn in els:
+                        if btn.is_displayed():
+                            aria = (btn.get_attribute('aria-label') or '').lower()
+                            if 'unlike' not in aria:
+                                like_btn = btn
+                                break
+                    if like_btn:
+                        break
+                except Exception:
+                    pass
+
+            if like_btn:
+                driver.execute_script("arguments[0].scrollIntoView(true);", like_btn)
+                time.sleep(0.5)
+                like_btn.click()
+                time.sleep(1)
+                print("  - Like: ✅ berhasil")
+            else:
+                print("  - Like: tombol tidak ditemukan")
+
+        time.sleep(2)
+        return  # sukses
+
+    raise Exception("TikTok gagal setelah 3x retry (kemungkinan blokir persisten)")
 
 def convert_instagram_reel_to_post(url):
     """Convert reels/reel URL to post /p/ URL if applicable"""
