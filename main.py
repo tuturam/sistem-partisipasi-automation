@@ -313,14 +313,41 @@ def _detect_tiktok_block():
         "try again later",
         "you've been temporarily blocked",
         "verify you are human",
+        "verify to continue",
+        "are you a human",
     ]
     for phrase in denied_phrases:
         if phrase in body_text:
             return "blocked"
 
     page_title = driver.title.lower()
-    if "access denied" in page_title:
-        return "blocked"
+    blocked_titles = ["access denied", "too many requests", "verify", "blocked", "sorry"]
+    for t in blocked_titles:
+        if t in page_title:
+            return "blocked"
+
+    # --- BLANK PAGE / SILENT BLOCK ---
+    # TikTok kadang return halaman kosong tanpa teks sebagai blokir halus
+    if len(body_text.strip()) < 20:
+        # Konfirmasi: cek sumber halaman (bukan cuma body text)
+        try:
+            page_source = driver.page_source.lower()
+            # Kalau source code juga pendek atau hampir kosong → blocked
+            if len(page_source) < 500:
+                return "blocked"
+            # Kalau body pendek tapi source ada → cek pola error di source
+            if "captcha" in page_source or "verify" in page_source or "block" in page_source:
+                return "blocked"
+        except Exception:
+            pass
+
+    # --- HTTP ERROR via page content ---
+    # Beberapa block pattern: empty body with error in HTML
+    try:
+        if "<pre>" in driver.page_source.lower() and "error" in driver.page_source.lower():
+            return "blocked"
+    except Exception:
+        pass
 
     return None
 
@@ -450,6 +477,7 @@ def do_tiktok_task(url):
 
         # === FOLLOW ===
         follow_done = False
+        follow_btn = None
         # Cek apakah udah follow
         try:
             unfollow_btn = driver.find_element(By.CSS_SELECTOR, '[data-e2e="unfollow-button"]')
@@ -491,6 +519,7 @@ def do_tiktok_task(url):
 
         # === LIKE ===
         like_done = False
+        like_btn = None
         # Cek apakah udah like
         try:
             unlike_btn = driver.find_element(By.CSS_SELECTOR, '[data-e2e="unlike-icon"]')
@@ -528,6 +557,20 @@ def do_tiktok_task(url):
                 print("  - Like: ✅ berhasil")
             else:
                 print("  - Like: tombol tidak ditemukan")
+
+        # === DOUBLE-CHECK: kalo dua-duanya ga ketemu → silent block ===
+        follow_found = follow_done or (follow_btn is not None)
+        like_found = like_done or (like_btn is not None)
+
+        if not follow_found and not like_found:
+            if attempt < 2:
+                print("  ⚠️ Semua tombol ga ditemukan — kemungkinan halaman blokir/diblok")
+                time.sleep(10)
+                continue
+            raise Exception(
+                "TikTok: tidak ada tombol follow/like setelah 3x retry. "
+                "Kemungkinan halaman diblokir atau konten tidak tersedia."
+            )
 
         time.sleep(2)
         return  # sukses
