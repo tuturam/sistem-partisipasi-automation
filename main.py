@@ -343,8 +343,27 @@ async def _wait_for_tiktok_content(tab: zd.Tab, timeout: int = 15) -> bool:
     return False
 
 
+_tiktok_prewarmed = False  # global flag — cuma warm sekali per session
+
+
 async def do_tiktok_task(tab: zd.Tab, url: str):
     """Follow + Like TikTok via zendriver CDP. Raise Exception kalo gagal total."""
+    global _tiktok_prewarmed
+
+    # Pre-warm: kunjungi TikTok homepage dulu buat load session cookies
+    if not _tiktok_prewarmed:
+        print("  [TikTok] Pre-warming session...")
+        await tab.get("https://www.tiktok.com/")
+        await asyncio.sleep(4)
+        # Cek apakah kena captcha/block saat pre-warm
+        warm_block = await _detect_tiktok_block(tab)
+        if warm_block:
+            print(f"  ⚠️ TikTok pre-warm kena {warm_block}!")
+            print("  ⚠️ Session belum verified. Buka Brave manual dulu, solve captcha, tutup, lalu /run lagi.")
+        else:
+            print("  [TikTok] Pre-warm OK — session verified")
+        _tiktok_prewarmed = True
+
     print(f"  [TikTok] Memproses: {url}")
 
     for attempt in range(3):
