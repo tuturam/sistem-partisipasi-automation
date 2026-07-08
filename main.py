@@ -1302,6 +1302,50 @@ async def run_automation(chat_id: str):
                     requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                                   json={"chat_id": chat_id, "text": "🚀 Memulai upload bukti..."})
 
+                # Restart browser — CDP WebSocket putus setelah idle lama
+                print("\n=== Restart Browser untuk Upload ===")
+                try:
+                    await browser.stop()
+                except Exception:
+                    pass
+                browser = None
+                await asyncio.sleep(1)
+                _clean_lock_files()
+
+                # Re-init (headless ok — dashboard ga peduli)
+                brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+                browser = await zd.start(
+                    browser_executable_path=brave_path,
+                    user_data_dir=CHROME_PROFILE_PATH,
+                    headless=HEADLESS_MODE,
+                    browser_args=[
+                        "--mute-audio", "--no-sandbox", "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                    ] + (["--headless=new", "--window-size=1920,1080",
+                          "--disable-features=HeadlessChrome", "--lang=en-US"]
+                         if HEADLESS_MODE else []),
+                    disable_webrtc=True,
+                    disable_webgl=True,
+                )
+                tab = browser.main_tab
+                await tab.set_window_size(1280, 800)
+
+                # Login ulang dashboard
+                print("  - Login ulang dashboard...")
+                await tab.get("https://admin.sistem-partisipasi.jovasoftware.id/dashboard")
+                await asyncio.sleep(3)
+                try:
+                    email_input = await tab.select('input[type="email"]', timeout=5)
+                    if email_input:
+                        await email_input.send_keys(EMAIL)
+                        await tab.select('input[type="password"]', timeout=3)
+                        await (await tab.select('input[type="password"]', timeout=3)).send_keys(PASSWORD)
+                        await (await tab.select('button[type="submit"]', timeout=3)).click()
+                        await asyncio.sleep(5)
+                except Exception:
+                    pass
+                print("  - Browser siap untuk upload")
+
                 print("\n=== Upload Bukti ===")
                 failed_tasks = []
                 for task_num, data in task_data.items():
@@ -1313,7 +1357,13 @@ async def run_automation(chat_id: str):
                         failed_tasks.append(task_num)
 
                 if failed_tasks:
-                    msg = f"⚠️ Upload selesai — {len(failed_tasks)}/{len(task_data)} gagal.\nGagal: Task {failed_tasks}"
+                    if len(failed_tasks) == len(task_data):
+                        msg = (f"❌ Upload GAGAL TOTAL — {len(failed_tasks)}/{len(task_data)} task.\n"
+                               f"Task gagal: {failed_tasks}\n"
+                               f"Cek log untuk detail error.")
+                    else:
+                        msg = (f"⚠️ Upload sebagian — {len(failed_tasks)}/{len(task_data)} gagal.\n"
+                               f"Gagal: Task {failed_tasks}")
                     print(f"\n=== {msg} ===")
                 else:
                     msg = "🎉 Semua task sukses disubmit!"
