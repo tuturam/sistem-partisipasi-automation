@@ -1251,26 +1251,29 @@ def listen_telegram_command():
             time.sleep(5)
 
 if __name__ == "__main__":
-    # Bersihin zombie Brave dari run sebelumnya (sebelum user punya session)
-    print("[Main] Membersihkan proses Brave zombie...")
-    try:
-        ps_cmd = 'Get-CimInstance Win32_Process -Filter "Name = \'brave.exe\'" | Select-Object ProcessId | ConvertTo-Json'
-        result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
-        if result.stdout.strip():
-            data = json.loads(result.stdout)
-            processes = data if isinstance(data, list) else [data]
-            killed = 0
-            for proc in processes:
-                pid = proc.get('ProcessId')
-                if pid:
-                    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
-                    killed += 1
-            if killed:
-                print(f"  - {killed} proses Brave zombie dibersihkan")
-    except Exception:
-        pass
-    # Bersihin lock files
+    # Bersihin zombie Brave dari run sebelumnya — HANYA yg pake automation profile
     if CHROME_PROFILE_PATH:
+        print("[Main] Membersihkan proses Brave zombie (automation profile)...")
+        try:
+            ps_cmd = 'Get-CimInstance Win32_Process -Filter "Name = \'brave.exe\'" | Select-Object ProcessId, CommandLine | ConvertTo-Json'
+            result = subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, text=True)
+            if result.stdout.strip():
+                data = json.loads(result.stdout)
+                processes = data if isinstance(data, list) else [data]
+                killed = 0
+                for proc in processes:
+                    cmd_line = proc.get('CommandLine', '') or ''
+                    pid = proc.get('ProcessId')
+                    if cmd_line and CHROME_PROFILE_PATH.lower() in cmd_line.lower():
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+                        killed += 1
+                if killed:
+                    print(f"  - {killed} proses Brave zombie (automation profile) dibersihkan")
+                else:
+                    print("  - Tidak ada zombie")
+        except Exception:
+            pass
+        # Bersihin lock files
         for lock in ["SingletonLock", "SingletonSocket", "DevToolsActivePort"]:
             lp = os.path.join(CHROME_PROFILE_PATH, lock)
             if os.path.exists(lp):
