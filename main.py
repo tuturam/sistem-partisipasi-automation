@@ -1123,7 +1123,25 @@ def listen_telegram_command():
 # ============================================================
 
 if __name__ == "__main__":
-    # Bersihin zombie Brave automation profile
+    import argparse
+    parser = argparse.ArgumentParser(description="Sistem Partisipasi Bot (zendriver)")
+    parser.add_argument("--prewarm", action="store_true",
+                        help="Buka Brave automation profile untuk pre-warm session")
+    args = parser.parse_args()
+
+    if args.prewarm:
+        print("[Prewarm] Membuka Brave dengan automation profile...")
+        print("[Prewarm] 1. Login/solve captcha di TikTok")
+        print("[Prewarm] 2. Tutup Brave setelah selesai")
+        _kill_automation_profile_brave()
+        _clean_lock_files()
+        subprocess.Popen([
+            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            f"--user-data-dir={CHROME_PROFILE_PATH}",
+        ])
+        sys.exit(0)
+
+    # Normal mode: bot listener
     _kill_automation_profile_brave()
     _clean_lock_files()
     cleanup_other_main_instances()
