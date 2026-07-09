@@ -807,218 +807,157 @@ async def take_screenshot(tab: zd.Tab, task_number: int) -> str:
     return filepath
 
 
-async def _get_dashboard_cookies(tab: zd.Tab) -> dict:
-    """Ambil cookies dari browser buat HTTP request."""
-    try:
-        result = await tab.send(zd.cdp.storage.get_cookies())
-        jar = {}
-        for c in result:
-            jar[c["name"]] = c["value"]
-        return jar
-    except Exception:
-        return {}
-
-
 async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
                                    screenshot_path: str):
-    """Upload via HTTP multipart langsung (bypass browser file input)."""
+    """Upload via CDP DOM.setFileInputFiles + click submit."""
     abs_path = os.path.abspath(screenshot_path)
     fname = os.path.basename(screenshot_path)
     print(f"  [Upload] {fname}")
 
-    # Ambil cookies dari browser session
-    try:
-        c = await _get_dashboard_cookies(tab)
-    except Exception:
-        c = {}
-    access_token = c.get("access_token", "")
-    user_cookie = c.get("user", "")
-
-    # Ekstrak task ID dari URL
-    task_id = task_link.rstrip("/").split("/")[-1]
-
-    # Buka halaman dulu buat dapetin next-action token
     await tab.get(task_link)
-    await asyncio.sleep(3)
+    await asyncio.sleep(4)
+
     try:
-        await tab.select('.prose', timeout=10)
+        await tab.select('.prose', timeout=15)
     except Exception:
         pass
     await asyncio.sleep(2)
 
-    # Ambil next-action header dari halaman
-    next_action = await tab.evaluate("""
+    # === DAPATKAN file input node ID ===
+    node_id = 0
+    # Mark element for CDP
+    await tab.evaluate("""
         (() => {
-            const scripts = document.querySelectorAll('script');
-            for (const s of scripts) {
-                const m = s.textContent?.match(/"[a-f0-9]{40}"/);
-                if (m) return m[0].replace(/"/g, '');
+            for (const el of document.querySelectorAll('input[type="file"]')) {
+                el.setAttribute('data-zd-up', '1');
+                break;
             }
-            // Fallback: cari di RSC payload
-            const body = document.body.innerHTML;
-            const m2 = body.match(/next-action[^}]+"([a-f0-9]{40})"/);
-            if (m2) return m2[1];
-            return null;
         })()
     """)
-
-    if not next_action:
-        # Fallback: coba dari sebelumnya (hardcode dari request user)
-        next_action = "605e93edafeda8779a6ef618952993ae5280344d11"
-
-    print(f"    next-action: {next_action[:20]}... task_id={task_id}")
-
-    # Isi reason textarea di browser (buat jaga-jaga)
-    await tab.evaluate("""
-        (() => { const ta = document.querySelector('textarea');
-         if (ta) { ta.value = '-';
-          ta.dispatchEvent(new Event('input', {bubbles: true}));
-          ta.dispatchEvent(new Event('change', {bubbles: true})); } })()
-    """)
-
-    # === HTTP multipart POST ===
-    # Next.js Server Action payload
-    # Format: multipart/form-data dengan field 1_id, 1_data, 1_reason, 0
-    fields = {
-        "1_id": task_id,
-        "1_data": f'["tasks/{int(time.time())}_{fname}"]',
-        "1_reason": "-",
-        "0": '[{"status":null},"$K1"]',
-    }
-
-    # Buat multipart dengan file
-    with open(abs_path, "rb") as f:
-        file_content = f.read()
-
-    boundary = "----ZdUpload" + str(int(time.time()))
-
-    # Body multipart manual
-    body_parts = []
-    for key, value in fields.items():
-        body_parts.append(f"--{boundary}".encode())
-        body_parts.append(f'Content-Disposition: form-data; name="{key}"'.encode())
-        body_parts.append(b"")
-        body_parts.append(value.encode())
-
-    # File part
-    body_parts.append(f"--{boundary}".encode())
-    body_parts.append(
-        f'Content-Disposition: form-data; name="1_data"; filename="{fname}"'.encode())
-    body_parts.append(b"Content-Type: image/png")
-    body_parts.append(b"")
-    body_parts.append(file_content)
-    body_parts.append(f"--{boundary}--".encode())
-
-    body = b"\r\n".join(body_parts)
-
-    headers = {
-        "accept": "text/x-component",
-        "content-type": f"multipart/form-data; boundary={boundary}",
-        "cookie": f"access_token={access_token}; user={user_cookie}",
-        "next-action": next_action,
-        "origin": "https://admin.sistem-partisipasi.jovasoftware.id",
-        "referer": task_link,
-    }
-
-    url = f"https://admin.sistem-partisipasi.jovasoftware.id/my-task/{task_id}"
+    await asyncio.sleep(0.3)
 
     try:
-        resp = requests.post(url, data=body, headers=headers, timeout=30)
-        print(f"    HTTP {resp.status_code}")
-
-        # Parse response — cek status
-        try:
-            # Next.js RSC response — cari error message
-            if '"status":false' in resp.text:
-                # Extract message
-                msg_match = re.search(r'"message":"([^"]+)"', resp.text)
-                err = msg_match.group(1) if msg_match else "unknown error"
-                print(f"    Server: {err}")
-
-                if "reason" in err.lower():
-                    # Reason field required — ini dialog expired
-                    # Coba lagi via browser UI
-                    print("    Reason required — trying via browser UI...")
-                    await _submit_via_browser(tab, screenshot_path)
-            elif '"status":true' in resp.text or resp.status_code == 200:
-                print(f"  ✅ Submitted!")
-            else:
-                print(f"    Response: {resp.text[:200]}")
-        except Exception:
-            pass
-
-    except Exception as e:
-        print(f"    HTTP error: {e}")
-        # Fallback: browser UI
-        await _submit_via_browser(tab, screenshot_path)
-
-    print(f"  ✅ Done — {fname}")
-
-
-async def _submit_via_browser(tab: zd.Tab, screenshot_path: str):
-    """Fallback: submit via browser UI — untuk task expired/dialog."""
-    abs_path = os.path.abspath(screenshot_path)
-
-    # Upload via CDP dulu (kalau bisa)
-    try:
-        await tab.evaluate("""
-            (() => { const e = document.querySelector('input[type=\"file\"]');
-             if (e) e.setAttribute('data-zd-up', '1'); })()
-        """)
-        await asyncio.sleep(0.3)
-
         doc = await tab.send(zd.cdp.dom.get_document(depth=0))
+        print(f"    doc nodeId={doc.node_id}")
         node_id = await tab.send(
             zd.cdp.dom.query_selector(
                 node_id=doc.node_id,
                 selector='[data-zd-up="1"]'
             )
         )
-        if node_id and node_id != 0:
-            await tab.send(zd.cdp.dom.set_file_input_files(
-                files=[abs_path], node_id=node_id))
-            await asyncio.sleep(1)
-            await tab.evaluate("""
-                (() => { const e = document.querySelector('input[type=\"file\"]');
-                 if (e) e.dispatchEvent(new Event('change', {bubbles: true})); })()
-            """)
+        print(f"    file input nodeId={node_id}")
     except Exception as e:
-        print(f"    CDP fallback: {e}")
+        print(f"    CDP query error: {e}")
 
-    # Isi reason
+    # === UPLOAD via CDP ===
+    if node_id and node_id != 0:
+        try:
+            # Use forward slashes for CDP
+            cdp_path = abs_path.replace("\\", "/")
+            await tab.send(zd.cdp.dom.set_file_input_files(
+                files=[cdp_path],
+                node_id=node_id
+            ))
+            await asyncio.sleep(2)
+
+            # Dispatch change event for React
+            await tab.evaluate("""
+                (() => {
+                    const el = document.querySelector('[data-zd-up="1"]');
+                    if (el) {
+                        el.dispatchEvent(new Event('change', {bubbles: true}));
+                        el.dispatchEvent(new Event('input', {bubbles: true}));
+                    }
+                })()
+            """)
+            await asyncio.sleep(1)
+
+            fc = await tab.evaluate(
+                "(document.querySelector('input[type=\"file\"]')?.files?.length) || 0")
+            print(f"    files.length={fc}")
+            if fc > 0:
+                print(f"    ✅ File uploaded")
+            else:
+                print(f"    ⚠️ files.length=0 — try anyway")
+        except Exception as e:
+            print(f"    CDP setFileInputFiles error: {e}")
+    else:
+        print(f"    ⚠️ File input nodeId invalid — skip CDP upload")
+
+    # === ISI REASON TEXTAREA ===
     await tab.evaluate("""
-        (() => { const ta = document.querySelector('textarea');
-         if (ta) { ta.value = '-'; ta.dispatchEvent(new Event('input', {bubbles: true})); } })()
+        (() => {
+            for (const ta of document.querySelectorAll('textarea')) {
+                ta.value = '-';
+                ta.dispatchEvent(new Event('input', {bubbles: true}));
+                ta.dispatchEvent(new Event('change', {bubbles: true}));
+            }
+        })()
     """)
     await asyncio.sleep(0.5)
 
-    # Click submit
+    # === CLICK SUBMIT ===
     await tab.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     await asyncio.sleep(1)
 
-    await tab.evaluate("""
-        (() => { for (const btn of document.querySelectorAll('button')) {
-            if (btn.textContent.trim() === 'Submit' && !btn.closest('#upload_reason_modal')) {
-                if (!btn.disabled) { btn.click(); return 'clicked'; } return 'disabled';
-            } } return 'not-found'; })()
+    clicked = await tab.evaluate("""
+        (() => {
+            for (const btn of document.querySelectorAll('button')) {
+                if (btn.textContent.trim() === 'Submit' &&
+                    !btn.closest('#upload_reason_modal')) {
+                    if (btn.disabled) return 'disabled';
+                    btn.click();
+                    return 'clicked';
+                }
+            }
+            return 'not-found';
+        })()
     """)
+    print(f"    Submit: {clicked}")
+
+    if clicked == 'disabled':
+        for i in range(30):
+            await asyncio.sleep(1)
+            r = await tab.evaluate("""
+                (() => {
+                    for (const btn of document.querySelectorAll('button')) {
+                        if (btn.textContent.trim() === 'Submit' &&
+                            !btn.closest('#upload_reason_modal')) {
+                            if (!btn.disabled) { btn.click(); return 'clicked'; }
+                            return 'still-disabled';
+                        }
+                    }
+                    return 'gone';
+                })()
+            """)
+            if r in ('clicked', 'gone'):
+                print(f"    Clicked after {i+1}s ({r})")
+                break
+
     await asyncio.sleep(2)
 
-    # Cek dialog expired
+    # === EXPIRED DIALOG ===
     try:
-        dialog = await tab.select('#upload_reason_modal', timeout=3)
+        dialog = await tab.select('#upload_reason_modal', timeout=4)
         if dialog:
+            print("    Expired dialog — fill reason...")
             await tab.evaluate("""
-                (() => { const ta = document.querySelector('#upload_reason_modal textarea');
-                 if (ta) { ta.value = '-'; ta.dispatchEvent(new Event('input', {bubbles: true})); } })()
+                (() => {
+                    const ta = document.querySelector('#upload_reason_modal textarea');
+                    if (ta) { ta.value = '-';
+                     ta.dispatchEvent(new Event('input', {bubbles: true})); }
+                })()
             """)
             await asyncio.sleep(0.5)
-            await tab.evaluate(
-                "document.querySelector('#upload_reason_modal button')?.click();")
+            await tab.evaluate("""
+                document.querySelector('#upload_reason_modal button')?.click();
+            """)
             await asyncio.sleep(2)
-            print("    Expired reason submitted via browser")
+            print("    Reason submitted")
     except Exception:
         pass
+
+    print(f"    ✅ Done — {fname}")
 
 
 # ============================================================
