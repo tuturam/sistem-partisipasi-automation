@@ -852,16 +852,15 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
             """)
             await asyncio.sleep(0.3)
 
-            # CDP query via zendriver cdp object
+            # CDP query
             try:
                 doc = await tab.send(zd.cdp.dom.get_document(depth=0))
-                node = await tab.send(
+                node_id = await tab.send(
                     zd.cdp.dom.query_selector(
-                        node_id=doc.root.node_id,
+                        node_id=doc.node_id,
                         selector='[data-zd-up="1"]'
                     )
                 )
-                node_id = node.node_id
             except Exception as cdp_err:
                 print(f"    CDP query: {cdp_err}")
                 continue
