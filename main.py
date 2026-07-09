@@ -884,19 +884,7 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
     else:
         print(f"    ⚠️ File input nodeId invalid — skip CDP upload")
 
-    # === ISI REASON TEXTAREA ===
-    await tab.evaluate("""
-        (() => {
-            for (const ta of document.querySelectorAll('textarea')) {
-                ta.value = '-';
-                ta.dispatchEvent(new Event('input', {bubbles: true}));
-                ta.dispatchEvent(new Event('change', {bubbles: true}));
-            }
-        })()
-    """)
-    await asyncio.sleep(0.5)
-
-    # === CLICK SUBMIT ===
+    # === CLICK SUBMIT (TANPA pre-fill reason — biar dialog handle) ===
     await tab.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     await asyncio.sleep(1)
 
@@ -913,7 +901,7 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
             return 'not-found';
         })()
     """)
-    print(f"    Submit: {clicked}")
+    print(f"    Main submit: {clicked}")
 
     if clicked == 'disabled':
         for i in range(30):
@@ -931,31 +919,41 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
                 })()
             """)
             if r in ('clicked', 'gone'):
-                print(f"    Clicked after {i+1}s ({r})")
+                print(f"    Submit clicked after {i+1}s")
                 break
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
 
-    # === EXPIRED DIALOG ===
+    # === EXPIRED DIALOG (muncu kalau reason kosong) ===
     try:
-        dialog = await tab.select('#upload_reason_modal', timeout=4)
+        dialog = await tab.select('#upload_reason_modal', timeout=5)
         if dialog:
-            print("    Expired dialog — fill reason...")
+            print("    Task expired — dialog muncul, isi reason...")
+            # Isi reason textarea DALAM dialog
             await tab.evaluate("""
                 (() => {
                     const ta = document.querySelector('#upload_reason_modal textarea');
                     if (ta) { ta.value = '-';
-                     ta.dispatchEvent(new Event('input', {bubbles: true})); }
+                     ta.dispatchEvent(new Event('input', {bubbles: true}));
+                     ta.dispatchEvent(new Event('change', {bubbles: true})); }
                 })()
             """)
             await asyncio.sleep(0.5)
+            # Click dialog Submit — INI submit sebenarnya
             await tab.evaluate("""
-                document.querySelector('#upload_reason_modal button')?.click();
+                (() => {
+                    const btns = document.querySelectorAll('#upload_reason_modal button');
+                    for (const btn of btns) {
+                        if (btn.textContent.trim() === 'Submit') { btn.click(); return; }
+                    }
+                })()
             """)
-            await asyncio.sleep(2)
-            print("    Reason submitted")
+            await asyncio.sleep(3)
+            print("    Expired dialog submitted")
+        else:
+            print("    No expired dialog — submitted on time")
     except Exception:
-        pass
+        print("    No expired dialog (on time)")
 
     print(f"    ✅ Done — {fname}")
 
