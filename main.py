@@ -598,8 +598,8 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 // Cari button like
                 for (const btn of document.querySelectorAll('button')) {
                     const aria = btn.getAttribute('aria-label') || '';
-                    if ((aria.startsWith('Like video') || aria.startsWith('Like\n') ||
-                         aria.startsWith('Suka video')) && btn.offsetParent !== null) {
+                    if ((aria.startsWith('Like video') || aria.startsWith('Suka video'))
+                        && btn.offsetParent !== null) {
                         btn.scrollIntoView({behavior:'instant',block:'center'});
                         btn.click();
                         btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
