@@ -425,6 +425,28 @@ async def _restart_headless() -> zd.Tab:
     return tab
 
 
+async def _restart_visible() -> zd.Tab:
+    """Restart browser dalam VISIBLE mode (buat TikTok yg bandel)."""
+    global browser
+    brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+    browser = await zd.start(
+        browser_executable_path=brave_path,
+        user_data_dir=CHROME_PROFILE_PATH,
+        headless=False,
+        browser_args=[
+            "--mute-audio", "--no-sandbox", "--disable-dev-shm-usage",
+            "--disable-gpu", "--window-size=1280,800",
+        ],
+        disable_webrtc=True,
+        disable_webgl=True,
+    )
+    tab = browser.main_tab
+    await tab.set_window_size(1280, 800)
+    _clean_lock_files()
+    print("    🖥️  Visible mode — user bisa lihat/solve captcha")
+    return tab
+
+
 async def do_tiktok_task(tab: zd.Tab, url: str):
     """Follow + Like TikTok via zendriver CDP. Raise Exception kalo gagal total."""
     global _tiktok_prewarmed
@@ -461,8 +483,11 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
 
     for attempt in range(3):
         print(f"  [TikTok] Attempt {attempt + 1}/3...")
-        await tab.get(url)
-        await asyncio.sleep(4)
+        if attempt < 2 or not HEADLESS_MODE:
+            # Normal: navigate dan cek
+            await tab.get(url)
+            await asyncio.sleep(4)
+        # Kalo attempt 3 + headless → langsung visible (skip headless navigate)
 
         # DETEKSI BLOK
         block = await _detect_tiktok_block(tab)
@@ -474,9 +499,10 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                     if attempt < 2:
                         continue
                     raise Exception("TikTok CAPTCHA — user timeout")
-                tab = await _restart_headless()
+                # PROSES DI VISIBLE — jangan restart headless
+                tab = await _restart_visible()
                 await tab.get(url)
-                await asyncio.sleep(3)
+                await asyncio.sleep(4)
             else:
                 if not await _wait_for_captcha_solve(tab):
                     if attempt < 2:
@@ -497,16 +523,16 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 print(f"  ❌ Access Denied / Rate Limited — tunggu {backoff}s...")
                 await asyncio.sleep(backoff)
                 continue
-            # Last attempt: coba switch ke visible
             if HEADLESS_MODE:
                 print("  🔓 Retry terakhir — switch ke visible mode...")
                 if not await _switch_to_visible_and_wait(tab, url):
                     raise Exception("TikTok tetap blokir — coba lagi nanti.")
-                tab = await _restart_headless()
+                # PROSES DI VISIBLE — jangan restart headless
+                tab = await _restart_visible()
                 await tab.get(url)
-                await asyncio.sleep(3)
-                continue
-            raise Exception("TikTok blokir akses setelah 3x retry. Tunggu 30-60 menit.")
+                await asyncio.sleep(4)
+            else:
+                raise Exception("TikTok blokir akses setelah 3x retry. Tunggu 30-60 menit.")
 
         # VERIFIKASI KONTEN
         if not await _wait_for_tiktok_content(tab):
