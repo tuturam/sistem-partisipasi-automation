@@ -190,6 +190,19 @@ async def init_browser() -> tuple[zd.Browser, zd.Tab]:
     tab = browser.main_tab
     await tab.set_window_size(1280, 800)
 
+    # Patch isTrusted — TikTok check ini buat blokir synthetic events
+    await tab.send(zd.cdp.page.add_script_to_evaluate_on_new_document(
+        source="""
+            (function() {
+                var orig = Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted');
+                Object.defineProperty(Event.prototype, 'isTrusted', {
+                    get: function() { return true; }
+                });
+            })();
+        """
+    ))
+    print("  - isTrusted patched → all events appear real")
+
     today = datetime.now().strftime("%Y-%m-%d")
     screenshot_dir = os.path.join(basedir, today)
     os.makedirs(screenshot_dir, exist_ok=True)
@@ -419,6 +432,15 @@ async def _restart_headless() -> zd.Tab:
     )
     tab = browser.main_tab
     await tab.set_window_size(1280, 800)
+    await tab.send(zd.cdp.page.add_script_to_evaluate_on_new_document(
+        source="""
+            (function() {
+                Object.defineProperty(Event.prototype, 'isTrusted', {
+                    get: function() { return true; }
+                });
+            })();
+        """
+    ))
     _clean_lock_files()
     print("    🔒 Kembali ke headless mode")
     return tab
@@ -441,6 +463,15 @@ async def _restart_visible() -> zd.Tab:
     )
     tab = browser.main_tab
     await tab.set_window_size(1280, 800)
+    await tab.send(zd.cdp.page.add_script_to_evaluate_on_new_document(
+        source="""
+            (function() {
+                Object.defineProperty(Event.prototype, 'isTrusted', {
+                    get: function() { return true; }
+                });
+            })();
+        """
+    ))
     _clean_lock_files()
     print("    🖥️  Visible mode — user bisa lihat/solve captcha")
     return tab
@@ -610,92 +641,49 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         if not like_ready:
             print("  - Like: tombol belum render — skip")
         else:
-            # 2. Click — CDP real mouse event (OS-level, impossible to detect)
+            # 2. Click — JS dengan isTrusted dipatch → TikTok anggap real click
             like_result = 'not-found'
             for tap_attempt in range(3):
-                # Cek unlike dulu
                 like_result = await tab.evaluate("""
                     (function() {
                         if (document.querySelector('[data-e2e=\"unlike-icon\"]')) return 'already-liked';
                         if (document.querySelector('[aria-label*=\"Unlike\"]')) return 'already-liked';
-                        return 'not-liked';
-                    })()
-                """)
-                if like_result == 'already-liked':
-                    break
-
-                # Dapatkan koordinat like-icon
-                rect = await tab.evaluate("""
-                    (function() {
+                        // Click span like-icon + parent button
                         var sp = document.querySelector('[data-e2e=\"like-icon\"]');
-                        if (!sp || !sp.offsetParent) return null;
-                        var r = sp.getBoundingClientRect();
-                        return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)};
+                        if (sp && sp.offsetParent) {
+                            sp.scrollIntoView({behavior:'instant',block:'center'});
+                            sp.click();
+                            sp.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                            sp.dispatchEvent(new PointerEvent('pointerdown',
+                                {bubbles:true,cancelable:true,isPrimary:true}));
+                            sp.dispatchEvent(new PointerEvent('pointerup',
+                                {bubbles:true,cancelable:true,isPrimary:true}));
+                            var pb = sp.closest('button');
+                            if (pb) { pb.click(); pb.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); }
+                            return 'clicked';
+                        }
+                        return 'not-found';
                     })()
                 """)
+                await asyncio.sleep(2)
 
-                if not rect:
-                    like_result = 'not-found'
-                    break
-
-                x, y = rect['x'], rect['y']
-                print(f"    CDP click at ({x}, {y})")
-
-                # CDP click — full interaction: move + touch + mouse
-                BTN = zd.cdp.input_.MouseButton.LEFT
-                # 1. Mouse moved ke posisi
-                await tab.send(zd.cdp.input_.dispatch_mouse_event(
-                    type_="mouseMoved", x=x, y=y))
-                await asyncio.sleep(0.05)
-                # 2. Touch start (mobile-first)
-                await tab.send(zd.cdp.input_.dispatch_mouse_event(
-                    type_="mousePressed", x=x, y=y,
-                    button=BTN, click_count=1, pointer_type="touch"))
-                await asyncio.sleep(0.1)
-                # 3. Touch end
-                await tab.send(zd.cdp.input_.dispatch_mouse_event(
-                    type_="mouseReleased", x=x, y=y,
-                    button=BTN, click_count=1, pointer_type="touch"))
-                await asyncio.sleep(0.1)
-                # 4. Mouse click as fallback
-                await tab.send(zd.cdp.input_.dispatch_mouse_event(
-                    type_="mousePressed", x=x, y=y,
-                    button=BTN, click_count=1))
-                await tab.send(zd.cdp.input_.dispatch_mouse_event(
-                    type_="mouseReleased", x=x, y=y,
-                    button=BTN, click_count=1))
-
-                await asyncio.sleep(1.5)
-
-                # Debug: dump like button state
+                # Debug
                 state = await tab.evaluate("""
                     (function() {
-                        var sp = document.querySelector('[data-e2e=\"like-icon\"]');
-                        var un = document.querySelector('[data-e2e=\"unlike-icon\"]');
-                        var btns = document.querySelectorAll('button');
-                        var aria = '';
-                        for (var i=0;i<btns.length;i++) {
-                            var a = btns[i].getAttribute('aria-label')||'';
-                            if (a.indexOf('Like')===0||a.indexOf('Unlike')===0) aria=a.substring(0,30);
-                        }
-                        return JSON.stringify({has_like:!!sp, has_unlike:!!un, aria:aria});
+                        return JSON.stringify({
+                            unlike:!!document.querySelector('[data-e2e=\"unlike-icon\"]'),
+                            aria_like:!!document.querySelector('[aria-label*=\"Like video\"]'),
+                            aria_unlike:!!document.querySelector('[aria-label*=\"Unlike\"]')
+                        });
                     })()
                 """)
                 print(f"    Like state: {state}")
 
-                # Verifikasi
-                verified = await tab.evaluate("""
-                    (function() {
-                        if (document.querySelector('[data-e2e=\"unlike-icon\"]')) return 'yes';
-                        if (document.querySelector('[aria-label*=\"Unlike\"]')) return 'yes';
-                        return 'no';
-                    })()
-                """)
-                if verified == 'yes':
+                if 'true' in state and 'unlike' in state:
                     like_result = 'clicked-verified'
                     break
                 if tap_attempt < 2:
-                    print(f"    CDP click belum verified — retry...")
+                    print(f"    Belum verified — retry...")
 
             if like_result in ('already-liked', 'clicked-verified'):
                 await asyncio.sleep(5)
