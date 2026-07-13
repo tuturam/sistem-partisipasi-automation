@@ -589,6 +589,12 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 await like_btn.scroll_into_view()
                 await asyncio.sleep(0.5)
                 await like_btn.click()
+                # JS fallback — beberapa site perlu synthetic event
+                await tab.evaluate("""
+                    (() => { const el = document.querySelector('[data-e2e="like-icon"]');
+                     if (el) { el.click(); el.dispatchEvent(new MouseEvent('click',
+                      {bubbles:true,cancelable:true})); } })()
+                """)
                 await asyncio.sleep(1)
                 print("  - Like: ✅ berhasil")
             else:
@@ -660,25 +666,28 @@ async def do_instagram_task(tab: zd.Tab, url: str):
                 svg_els = []
 
             if svg_els:
-                svg = svg_els[-1]
-                # Naik ke parent div[role='button']
-                try:
-                    parent_div = await svg.query_selector("xpath=ancestor::div[@role='button']")
-                    if not parent_div:
-                        parent_div = svg
-                    await parent_div.click()
-                    await asyncio.sleep(1)
-                    print("  - Like: ✅ berhasil")
-                except Exception:
-                    print("  - Like: gagal klik")
+                # Click via JS — zendriver ga support XPath ancestor
+                clicked = await tab.evaluate("""
+                    (() => {
+                        const svgs = document.querySelectorAll('svg[aria-label="Like"],svg[aria-label="Suka"]');
+                        for (const svg of svgs) {
+                            const btn = svg.closest('div[role="button"]');
+                            if (btn) { btn.click(); return true; }
+                            svg.click();
+                            return true;
+                        }
+                        return false;
+                    })()
+                """)
+                await asyncio.sleep(1)
+                print(f"  - Like: {'✅ berhasil' if clicked else 'gagal klik'}")
             else:
-                try:
-                    unlike = await tab.select('svg[aria-label="Unlike"]', timeout=1)
-                    if unlike:
-                        print("  - Like: sudah di-like")
-                    else:
-                        print("  - Like: tombol tidak ditemukan")
-                except Exception:
+                already = await tab.evaluate("""
+                    (() => !!document.querySelector('svg[aria-label="Unlike"]'))()
+                """)
+                if already:
+                    print("  - Like: sudah di-like")
+                else:
                     print("  - Like: tombol tidak ditemukan")
 
             await asyncio.sleep(2)
@@ -753,26 +762,38 @@ async def do_youtube_task(tab: zd.Tab, url: str):
         print("  - Subscribe: tombol tidak ditemukan")
 
     # --- LIKE ---
-    try:
-        for sel in ['like-button-view-model button',
-                    '#segmented-like-button button',
-                    'ytd-segmented-like-dislike-button-renderer button']:
-            try:
-                btn = await tab.select(sel, timeout=2)
-                pressed = btn.attrs.get('aria-pressed', '')
-                if pressed == 'false':
-                    await btn.click()
-                    await asyncio.sleep(1)
-                    print("  - Like: ✅ berhasil")
-                else:
-                    print("  - Like: sudah di-like")
+    liked = False
+    for sel in ['like-button-view-model button',
+                '#segmented-like-button button',
+                'ytd-segmented-like-dislike-button-renderer button',
+                'button[aria-label*="like this video"]']:
+        try:
+            btn = await tab.select(sel, timeout=2)
+            pressed = btn.attrs.get('aria-pressed', '')
+            if pressed == 'false':
+                await btn.scroll_into_view()
+                await asyncio.sleep(0.3)
+                await btn.click()
+                # JS fallback
+                await tab.evaluate(f"""
+                    (() => {{ const el = document.querySelector('{sel}');
+                     if (el && el.getAttribute('aria-pressed')==='false') {{
+                      el.click(); el.dispatchEvent(new MouseEvent('click',
+                       {{bubbles:true,cancelable:true}})); }} }})()
+                """)
+                await asyncio.sleep(1)
+                print("  - Like: ✅ berhasil")
+                liked = True
                 break
-            except Exception:
-                continue
-        else:
-            print("  - Like: tombol tidak ditemukan")
-    except Exception as e:
-        print(f"  - Like error: {e}")
+            elif pressed == 'true':
+                print("  - Like: sudah di-like")
+                liked = True
+                break
+        except Exception:
+            continue
+
+    if not liked:
+        print("  - Like: tombol tidak ditemukan")
 
     await asyncio.sleep(2)
 
