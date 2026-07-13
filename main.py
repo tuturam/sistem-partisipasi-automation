@@ -1337,10 +1337,11 @@ async def run_automation(chat_id: str):
                     # Screenshot — retry with browser restart if CDP drops
                     for ss_attempt in range(3):
                         try:
-                            # Navigate ke social URL kalo baru restart
                             if ss_attempt > 0:
+                                # Restart case: navigate ke social URL
                                 await tab.get(url)
-                                await asyncio.sleep(2)
+                                await asyncio.sleep(3)
+                            # ss_attempt==0: tab masih di halaman setelah like — langsung SS
                             await _wait_page_ready(tab)
                             screenshot_path = await take_screenshot(tab, i)
                             task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
