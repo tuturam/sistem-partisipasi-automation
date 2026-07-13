@@ -516,95 +516,73 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 continue
             raise Exception("Konten TikTok ga muncul setelah 3x retry")
 
-        # === FOLLOW ===
-        follow_done = False
-        follow_btn = None
+        # === FOLLOW (JS langsung — exact text match) ===
+        follow_result = await tab.evaluate("""
+            (() => {
+                // Cek udah following
+                if (document.querySelector('[data-e2e="unfollow-button"]')) {
+                    return 'already-following';
+                }
+                // Cari tombol Follow exact text
+                for (const btn of document.querySelectorAll('button')) {
+                    const t = (btn.textContent || '').trim();
+                    if ((t === 'Follow' || t === 'Ikuti') &&
+                        btn.offsetParent !== null &&
+                        !btn.closest('[data-e2e="followers"]')) {
+                        btn.scrollIntoView({behavior:'instant',block:'center'});
+                        btn.click();
+                        btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        return 'clicked';
+                    }
+                }
+                return 'not-found';
+            })()
+        """)
+        if follow_result == 'already-following':
+            print("  - Follow: sudah di-follow")
+        elif follow_result == 'clicked':
+            await asyncio.sleep(1.5)
+            print("  - Follow: ✅ berhasil")
+        else:
+            print("  - Follow: tombol tidak ditemukan")
 
-        try:
-            el = await tab.select('[data-e2e="unfollow-button"]', timeout=1)
-            if el:
-                print("  - Follow: sudah di-follow")
-                follow_done = True
-        except Exception:
-            pass
-
-        if not follow_done:
-            for sel in ['[data-e2e="follow-button"]',
-                        'button:has-text("Follow")']:
-                try:
-                    el = await tab.select(sel, timeout=2)
-                    if el:
-                        txt = (el.text or "").lower()
-                        if 'following' not in txt:
-                            follow_btn = el
-                            break
-                except Exception:
-                    pass
-
-            # Fallback: find by text
-            if not follow_btn:
-                try:
-                    el = await tab.find("Follow", timeout=2)
-                    if el and 'following' not in (el.text or "").lower():
-                        follow_btn = el
-                except Exception:
-                    pass
-
-            if follow_btn:
-                await follow_btn.scroll_into_view()
-                await asyncio.sleep(0.5)
-                await follow_btn.click()
-                await asyncio.sleep(1.5)
-                print("  - Follow: ✅ berhasil")
-            else:
-                print("  - Follow: tombol tidak ditemukan")
-
-        # === LIKE ===
-        like_done = False
-        like_btn = None
-
-        try:
-            el = await tab.select('[data-e2e="unlike-icon"]', timeout=1)
-            if el:
-                print("  - Like: sudah di-like")
-                like_done = True
-        except Exception:
-            pass
-
-        if not like_done:
-            for sel in ['[data-e2e="like-icon"]',
-                        'button[aria-label*="Like"]',
-                        '[class*="like-button"]']:
-                try:
-                    el = await tab.select(sel, timeout=2)
-                    if el:
-                        aria = (el.attrs.get('aria-label') or '').lower()
-                        if 'unlike' not in aria:
-                            like_btn = el
-                            break
-                except Exception:
-                    pass
-
-            if like_btn:
-                await like_btn.scroll_into_view()
-                await asyncio.sleep(0.5)
-                await like_btn.click()
-                # JS fallback — beberapa site perlu synthetic event
-                await tab.evaluate("""
-                    (() => { const el = document.querySelector('[data-e2e="like-icon"]');
-                     if (el) { el.click(); el.dispatchEvent(new MouseEvent('click',
-                      {bubbles:true,cancelable:true})); } })()
-                """)
-                await asyncio.sleep(1)
-                print("  - Like: ✅ berhasil")
-            else:
-                print("  - Like: tombol tidak ditemukan")
+        # === LIKE (JS langsung) ===
+        like_result = await tab.evaluate("""
+            (() => {
+                // Cek udah like
+                if (document.querySelector('[data-e2e="unlike-icon"]')) {
+                    return 'already-liked';
+                }
+                // Cari like button
+                for (const sel of ['[data-e2e="like-icon"]',
+                                   'button[aria-label*="Like"]',
+                                   '[class*="like-button"]']) {
+                    const el = document.querySelector(sel);
+                    if (el && el.offsetParent !== null) {
+                        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                        if (aria.includes('unlike')) continue;
+                        el.scrollIntoView({behavior:'instant',block:'center'});
+                        el.click();
+                        el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        return 'clicked';
+                    }
+                }
+                return 'not-found';
+            })()
+        """)
+        if like_result == 'already-liked':
+            print("  - Like: sudah di-like")
+        elif like_result == 'clicked':
+            await asyncio.sleep(1)
+            print("  - Like: ✅ berhasil")
+        else:
+            print("  - Like: tombol tidak ditemukan")
 
         # === DOUBLE-CHECK SILENT BLOCK ===
-        follow_found = follow_done or (follow_btn is not None)
-        like_found = like_done or (like_btn is not None)
+        follow_ok = follow_result in ('already-following', 'clicked')
+        like_ok = like_result in ('already-liked', 'clicked')
 
-        if not follow_found and not like_found:
+        if not follow_ok and not like_ok:
             if attempt < 2:
                 print("  ⚠️ Semua tombol ga ditemukan — kemungkinan halaman blokir")
                 await asyncio.sleep(10)
@@ -643,52 +621,81 @@ async def do_instagram_task(tab: zd.Tab, url: str):
             await tab.get(target)
             await asyncio.sleep(5)
 
-            # --- FOLLOW ---
-            try:
-                btn = await tab.find("Follow", timeout=3)
-                txt = (btn.text or "").strip().lower()
-                if txt == 'follow':
-                    await btn.scroll_into_view()
-                    await asyncio.sleep(0.5)
-                    await btn.click()
-                    await asyncio.sleep(2)
-                    print("  - Follow: ✅ berhasil")
-                else:
-                    print("  - Follow: sudah di-follow")
-            except Exception:
-                print("  - Follow: tombol tidak ditemukan")
+            # --- FOLLOW (exact text match) ---
+            followed = False
+            for txt in ['Follow', 'Ikuti']:
+                try:
+                    found = await tab.evaluate(f"""
+                        (() => {{
+                            for (const el of document.querySelectorAll('button,div[role="button"]')) {{
+                                const t = el.textContent.trim();
+                                if (t === '{txt}' && el.offsetParent !== null) {{
+                                    el.setAttribute('data-zd-fw', '1'); return true;
+                                }}
+                            }}
+                            return false;
+                        }})()
+                    """)
+                    if found:
+                        el = await tab.select('[data-zd-fw="1"]', timeout=1)
+                        if el:
+                            await el.scroll_into_view()
+                            await asyncio.sleep(0.3)
+                            await el.click()
+                            await asyncio.sleep(2)
+                            print("  - Follow: ✅ berhasil")
+                            followed = True
+                            break
+                except Exception:
+                    pass
 
-            # --- LIKE ---
-            try:
-                svg_els = await tab.select_all('svg[aria-label="Like"]', timeout=2)
-                svg_els.extend(await tab.select_all('svg[aria-label="Suka"]', timeout=1))
-            except Exception:
-                svg_els = []
-
-            if svg_els:
-                # Click via JS — zendriver ga support XPath ancestor
-                clicked = await tab.evaluate("""
+            if not followed:
+                # Cek udah following
+                following = await tab.evaluate("""
                     (() => {
-                        const svgs = document.querySelectorAll('svg[aria-label="Like"],svg[aria-label="Suka"]');
-                        for (const svg of svgs) {
-                            const btn = svg.closest('div[role="button"]');
-                            if (btn) { btn.click(); return true; }
-                            svg.click();
-                            return true;
+                        for (const el of document.querySelectorAll('button,div[role="button"]')) {
+                            const t = el.textContent.trim();
+                            if (t === 'Following' || t === 'Mengikuti' ||
+                                t === 'Requested' || t === 'Diminta') return true;
                         }
                         return false;
                     })()
                 """)
-                await asyncio.sleep(1)
-                print(f"  - Like: {'✅ berhasil' if clicked else 'gagal klik'}")
-            else:
-                already = await tab.evaluate("""
-                    (() => !!document.querySelector('svg[aria-label="Unlike"]'))()
-                """)
-                if already:
-                    print("  - Like: sudah di-like")
+                if following:
+                    print("  - Follow: sudah di-follow")
                 else:
-                    print("  - Like: tombol tidak ditemukan")
+                    print("  - Follow: tombol tidak ditemukan")
+
+            # --- LIKE (direct JS — bypass zendriver select_all) ---
+            # Instagram Like: DIV[role="button"] > SPAN > SVG[aria-label="Like"]
+            like_clicked = await tab.evaluate("""
+                (() => {
+                    for (const svg of document.querySelectorAll('svg[aria-label="Like"],svg[aria-label="Suka"]')) {
+                        if (svg.offsetParent === null) continue;
+                        const btn = svg.closest('div[role="button"]');
+                        if (btn && btn.offsetParent !== null) {
+                            btn.click();
+                            btn.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}));
+                            return 'clicked-button';
+                        }
+                        svg.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}));
+                        return 'clicked-svg';
+                    }
+                    // Cek udah unlike
+                    if (document.querySelector('svg[aria-label="Unlike"]') ||
+                        document.querySelector('svg[aria-label="Tidak Suka"]')) {
+                        return 'already-liked';
+                    }
+                    return 'not-found';
+                })()
+            """)
+            if like_clicked == 'clicked-button' or like_clicked == 'clicked-svg':
+                await asyncio.sleep(1)
+                print(f"  - Like: ✅ berhasil ({like_clicked})")
+            elif like_clicked == 'already-liked':
+                print("  - Like: sudah di-like")
+            else:
+                print("  - Like: tombol tidak ditemukan")
 
             await asyncio.sleep(2)
             return
