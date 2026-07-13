@@ -1333,9 +1333,34 @@ async def run_automation(chat_id: str):
                         print(f"  Unknown platform: {url} — skip")
                         break
 
-                    await _wait_page_ready(tab)
-                    screenshot_path = await take_screenshot(tab, i)
-                    task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
+                    # Screenshot — retry with browser restart if CDP drops
+                    for ss_attempt in range(3):
+                        try:
+                            # Navigate ke social URL kalo baru restart
+                            if ss_attempt > 0:
+                                await tab.get(url)
+                                await asyncio.sleep(2)
+                            await _wait_page_ready(tab)
+                            screenshot_path = await take_screenshot(tab, i)
+                            task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
+                            break
+                        except Exception as ss_err:
+                            err_msg = str(ss_err)
+                            if 'no close frame' in err_msg and ss_attempt < 2:
+                                print(f"  ⚠️ CDP disconnected — restarting browser...")
+                                try:
+                                    await browser.stop()
+                                except Exception:
+                                    pass
+                                browser = None
+                                await asyncio.sleep(1)
+                                _clean_lock_files()
+                                browser, tab = await init_browser()
+                                await tab.get("https://admin.sistem-partisipasi.jovasoftware.id/dashboard")
+                                await asyncio.sleep(2)
+                                print(f"  ✅ Browser restarted")
+                            else:
+                                raise
                 except Exception as e:
                     print(f"  ❌ Error task {i}: {e}")
                     continue
