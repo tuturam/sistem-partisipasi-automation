@@ -641,14 +641,15 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 x, y = rect['x'], rect['y']
                 print(f"    CDP click at ({x}, {y})")
 
-                # Real mouse click via CDP Input (domain = input_ karena 'input' keyword Python)
+                # CDP mouse click — OS-level, pakai enum values
+                BTN = zd.cdp.input_.MouseButton.LEFT
                 await tab.send(zd.cdp.input_.dispatch_mouse_event(
                     type_="mousePressed", x=x, y=y,
-                    button="left", click_count=1))
+                    button=BTN, click_count=1))
                 await asyncio.sleep(0.1)
                 await tab.send(zd.cdp.input_.dispatch_mouse_event(
                     type_="mouseReleased", x=x, y=y,
-                    button="left", click_count=1))
+                    button=BTN, click_count=1))
 
                 await asyncio.sleep(1.5)
 
