@@ -478,14 +478,19 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
             print("  [TikTok] Pre-warm OK — session verified")
         _tiktok_prewarmed = True
 
-    print(f"  [TikTok] Memproses: {url}")
+    print(f"  [TikTok] URL: {url}")
 
     for attempt in range(3):
         print(f"  [TikTok] Attempt {attempt + 1}/3...")
         if attempt < 2 or not HEADLESS_MODE:
-            # Normal: navigate dan cek
+            # Navigate ke URL
             await tab.get(url)
-            await asyncio.sleep(4)
+            await asyncio.sleep(5)
+            # Log final URL setelah redirect
+            final = tab.url
+            print(f"  [TikTok] Final URL: {final}")
+            if '/video/' not in (final or ''):
+                print(f"  ⚠️ Bukan halaman video TikTok! Redirect ke: {final}")
         # Kalo attempt 3 + headless → langsung visible (skip headless navigate)
 
         # DETEKSI BLOK
@@ -498,10 +503,10 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                     if attempt < 2:
                         continue
                     raise Exception("TikTok CAPTCHA — user timeout")
-                # PROSES DI VISIBLE — jangan restart headless
                 tab = await _restart_visible()
                 await tab.get(url)
-                await asyncio.sleep(4)
+                await asyncio.sleep(5)
+                print(f"  [TikTok] Final URL (visible): {tab.url}")
             else:
                 if not await _wait_for_captcha_solve(tab):
                     if attempt < 2:
@@ -529,7 +534,8 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 # PROSES DI VISIBLE — jangan restart headless
                 tab = await _restart_visible()
                 await tab.get(url)
-                await asyncio.sleep(4)
+                await asyncio.sleep(5)
+                print(f"  [TikTok] Final URL (visible): {tab.url}")
             else:
                 raise Exception("TikTok blokir akses setelah 3x retry. Tunggu 30-60 menit.")
 
