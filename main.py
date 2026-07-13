@@ -641,17 +641,47 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 x, y = rect['x'], rect['y']
                 print(f"    CDP click at ({x}, {y})")
 
-                # CDP mouse click — OS-level, pakai enum values
+                # CDP click — full interaction: move + touch + mouse
                 BTN = zd.cdp.input_.MouseButton.LEFT
+                # 1. Mouse moved ke posisi
+                await tab.send(zd.cdp.input_.dispatch_mouse_event(
+                    type_="mouseMoved", x=x, y=y))
+                await asyncio.sleep(0.05)
+                # 2. Touch start (mobile-first)
+                await tab.send(zd.cdp.input_.dispatch_mouse_event(
+                    type_="mousePressed", x=x, y=y,
+                    button=BTN, click_count=1, pointer_type="touch"))
+                await asyncio.sleep(0.1)
+                # 3. Touch end
+                await tab.send(zd.cdp.input_.dispatch_mouse_event(
+                    type_="mouseReleased", x=x, y=y,
+                    button=BTN, click_count=1, pointer_type="touch"))
+                await asyncio.sleep(0.1)
+                # 4. Mouse click as fallback
                 await tab.send(zd.cdp.input_.dispatch_mouse_event(
                     type_="mousePressed", x=x, y=y,
                     button=BTN, click_count=1))
-                await asyncio.sleep(0.1)
                 await tab.send(zd.cdp.input_.dispatch_mouse_event(
                     type_="mouseReleased", x=x, y=y,
                     button=BTN, click_count=1))
 
                 await asyncio.sleep(1.5)
+
+                # Debug: dump like button state
+                state = await tab.evaluate("""
+                    (function() {
+                        var sp = document.querySelector('[data-e2e=\"like-icon\"]');
+                        var un = document.querySelector('[data-e2e=\"unlike-icon\"]');
+                        var btns = document.querySelectorAll('button');
+                        var aria = '';
+                        for (var i=0;i<btns.length;i++) {
+                            var a = btns[i].getAttribute('aria-label')||'';
+                            if (a.indexOf('Like')===0||a.indexOf('Unlike')===0) aria=a.substring(0,30);
+                        }
+                        return JSON.stringify({has_like:!!sp, has_unlike:!!un, aria:aria});
+                    })()
+                """)
+                print(f"    Like state: {state}")
 
                 # Verifikasi
                 verified = await tab.evaluate("""
