@@ -668,10 +668,10 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                     print(f"    CDP click belum verified — retry...")
 
             if like_result in ('already-liked', 'clicked-verified'):
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
                 print(f"  - Like: ✅ berhasil ({like_result})")
             elif like_result == 'not-liked':
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
                 print(f"  - Like: ✅ clicked (CDP, unverified)")
             else:
                 print(f"  - Like: tombol tidak ditemukan")
@@ -802,7 +802,7 @@ async def do_instagram_task(tab: zd.Tab, url: str):
                 await asyncio.sleep(0.5)
 
             if like_clicked in ('clicked-button', 'clicked-svg', 'clicked-div'):
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
                 print(f"  - Like: ✅ berhasil ({like_clicked})")
             elif like_clicked == 'already-liked':
                 print("  - Like: sudah di-like")
@@ -900,7 +900,7 @@ async def do_youtube_task(tab: zd.Tab, url: str):
                       el.click(); el.dispatchEvent(new MouseEvent('click',
                        {{bubbles:true,cancelable:true}})); }} }})()
                 """)
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
                 print("  - Like: ✅ berhasil")
                 liked = True
                 break
