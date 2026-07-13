@@ -516,19 +516,34 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 continue
             raise Exception("Konten TikTok ga muncul setelah 3x retry")
 
-        # === FOLLOW (JS langsung — exact text match) ===
+        # === FOLLOW (JS — profile page: text match, video page: data-e2e) ===
         follow_result = await tab.evaluate("""
             (() => {
                 // Cek udah following
                 if (document.querySelector('[data-e2e="unfollow-button"]')) {
                     return 'already-following';
                 }
-                // Cari tombol Follow exact text
+                // Cari feed-follow button (video page)
+                const feedBtn = document.querySelector('[data-e2e="feed-follow"]');
+                if (feedBtn && feedBtn.offsetParent !== null) {
+                    feedBtn.scrollIntoView({behavior:'instant',block:'center'});
+                    feedBtn.click();
+                    feedBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                    return 'clicked';
+                }
+                // Cari follow-button (profile page)
+                const followBtn = document.querySelector('[data-e2e="follow-button"]');
+                if (followBtn && followBtn.offsetParent !== null) {
+                    followBtn.scrollIntoView({behavior:'instant',block:'center'});
+                    followBtn.click();
+                    followBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                    return 'clicked';
+                }
+                // Fallback: exact text match
                 for (const btn of document.querySelectorAll('button')) {
                     const t = (btn.textContent || '').trim();
                     if ((t === 'Follow' || t === 'Ikuti') &&
-                        btn.offsetParent !== null &&
-                        !btn.closest('[data-e2e="followers"]')) {
+                        btn.offsetParent !== null) {
                         btn.scrollIntoView({behavior:'instant',block:'center'});
                         btn.click();
                         btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
@@ -546,57 +561,50 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         else:
             print("  - Follow: tombol tidak ditemukan")
 
-        # === LIKE (JS — tunggu video render dulu) ===
-        # Like button cuma ada di halaman video, bukan profile
-        for _ in range(10):  # tunggu max 5 detik
-            has_video = await tab.evaluate(
-                "(!!document.querySelector('video')) || "
-                "(!!document.querySelector('[data-e2e=\"like-icon\"]'))")
-            if has_video:
-                break
-            await asyncio.sleep(0.5)
-
+        # === LIKE (TikTok video page) ===
+        # Struktur: BUTTON[aria-label="Like video\n..."] > SPAN[data-e2e="like-icon"]
         like_result = await tab.evaluate("""
             (() => {
                 // Cek udah like
-                if (document.querySelector('[data-e2e="unlike-icon"]')) return 'already-liked';
-                // Cari like button — banyak selector
-                const sels = [
-                    '[data-e2e="like-icon"]',
-                    '[data-e2e="like-active-icon"]',
-                    'span[data-e2e="like-icon"]',
-                    'span[data-e2e="like-active-icon"]',
-                    'button[aria-label*="Like"]',
-                    'button[aria-label*="like"]',
-                    '[class*="like-button"]',
-                    '[class*="LikeIcon"]',
-                ];
-                for (const sel of sels) {
-                    const el = document.querySelector(sel);
-                    if (!el || el.offsetParent === null) continue;
-                    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
-                    if (aria.includes('unlike')) continue;
-                    // Scroll & click
-                    try { el.scrollIntoView({behavior:'instant',block:'center'}); } catch(e) {}
-                    el.click();
-                    el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                    // Juga click parent span/button
-                    const p = el.closest('span[data-e2e],button');
-                    if (p && p !== el) {
-                        try { p.click(); p.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); } catch(e) {}
+                const unlikeBtn = document.querySelector('[aria-label*=\"Unlike\"]');
+                if (unlikeBtn) return 'already-liked';
+
+                // Cari button like
+                for (const btn of document.querySelectorAll('button')) {
+                    const aria = btn.getAttribute('aria-label') || '';
+                    if ((aria.startsWith('Like video') || aria.startsWith('Like\n') ||
+                         aria.startsWith('Suka video')) && btn.offsetParent !== null) {
+                        btn.scrollIntoView({behavior:'instant',block:'center'});
+                        btn.click();
+                        btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        btn.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true}));
+                        return 'clicked';
                     }
-                    return 'clicked';
+                }
+                // Fallback: click span like-icon
+                const span = document.querySelector('[data-e2e=\"like-icon\"]');
+                if (span && span.offsetParent !== null) {
+                    span.scrollIntoView({behavior:'instant',block:'center'});
+                    span.click();
+                    span.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                    // Juga click parent button
+                    const parentBtn = span.closest('button');
+                    if (parentBtn) {
+                        parentBtn.click();
+                        parentBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                    }
+                    return 'clicked-span';
                 }
                 return 'not-found';
             })()
         """)
         if like_result == 'already-liked':
             print("  - Like: sudah di-like")
-        elif like_result == 'clicked':
+        elif like_result.startswith('clicked'):
             await asyncio.sleep(1)
-            print("  - Like: ✅ berhasil")
+            print(f"  - Like: ✅ berhasil ({like_result})")
         else:
-            print("  - Like: tombol tidak ditemukan (mungkin halaman profile, bukan video)")
+            print("  - Like: tombol tidak ditemukan")
 
         # === DOUBLE-CHECK SILENT BLOCK ===
         follow_ok = follow_result in ('already-following', 'clicked')
