@@ -586,53 +586,83 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         else:
             print("  - Follow: tombol tidak ditemukan")
 
-        # === LIKE (TikTok video page — full touch simulation) ===
-        # TikTok mobile web butuh touch + pointer events, bukan cuma click
-        like_result = await tab.evaluate("""
-            (function() {
-                function tap(el) {
-                    el.scrollIntoView();
-                    el.dispatchEvent(new PointerEvent('pointerdown',
-                        {bubbles:true,cancelable:true,pointerId:1,isPrimary:true}));
-                    el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));
-                    el.dispatchEvent(new PointerEvent('pointerup',
-                        {bubbles:true,cancelable:true,pointerId:1,isPrimary:true}));
-                    el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true}));
-                    el.click();
-                    el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                }
-                // Cek unlike
-                if (document.querySelector('[aria-label*=\"Unlike\"]')) return 'already-liked';
-                // Cari button like via aria-label
-                var btns = document.querySelectorAll('button');
-                for (var i = 0; i < btns.length; i++) {
-                    var a = btns[i].getAttribute('aria-label') || '';
-                    if ((a.indexOf('Like video')===0 || a.indexOf('Suka video')===0) &&
-                        btns[i].offsetParent) {
-                        tap(btns[i]);
-                        return 'clicked-btn';
-                    }
-                }
-                // Fallback: span[data-e2e="like-icon"]
-                var sp = document.querySelector('[data-e2e=\"like-icon\"]');
-                if (sp && sp.offsetParent) {
-                    tap(sp);
-                    // Juga tap parent button
-                    var pb = sp.closest('button');
-                    if (pb) tap(pb);
-                    return 'clicked-span';
-                }
-                return 'not-found';
-            })()
-        """)
-        if like_result == 'already-liked':
-            print("  - Like: sudah di-like")
-        elif like_result.startswith('clicked'):
-            # Jeda biar heart merah render sebelum screenshot
-            await asyncio.sleep(2)
-            print(f"  - Like: ✅ berhasil ({like_result})")
+        # === LIKE (TikTok video page — wait + verify) ===
+        # 1. Tunggu like button proper render
+        like_ready = False
+        for _ in range(20):  # max 10 detik
+            ready = await tab.evaluate(
+                "(function(){"
+                " var e=document.querySelector('[data-e2e=\"like-icon\"]');"
+                " return !!(e && e.offsetParent && e.getBoundingClientRect().width>0);"
+                "})()")
+            if ready:
+                like_ready = True
+                break
+            await asyncio.sleep(0.5)
+
+        if not like_ready:
+            print("  - Like: tombol belum render — skip")
         else:
-            print("  - Like: tombol tidak ditemukan")
+            # 2. Click with verification
+            like_result = 'not-found'
+            for tap_attempt in range(3):
+                like_result = await tab.evaluate("""
+                    (function() {
+                        function tap(el) {
+                            el.scrollIntoView();
+                            el.dispatchEvent(new PointerEvent('pointerdown',
+                                {bubbles:true,cancelable:true,pointerId:1,isPrimary:true}));
+                            el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));
+                            el.dispatchEvent(new PointerEvent('pointerup',
+                                {bubbles:true,cancelable:true,pointerId:1,isPrimary:true}));
+                            el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true}));
+                            el.click();
+                            el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        }
+                        if (document.querySelector('[aria-label*=\"Unlike\"]')) return 'already-liked';
+                        if (document.querySelector('[data-e2e=\"unlike-icon\"]')) return 'already-liked';
+                        var btns = document.querySelectorAll('button');
+                        for (var i = 0; i < btns.length; i++) {
+                            var a = btns[i].getAttribute('aria-label') || '';
+                            if ((a.indexOf('Like video')===0 || a.indexOf('Suka video')===0) &&
+                                btns[i].offsetParent) {
+                                tap(btns[i]);
+                                return 'clicked-btn';
+                            }
+                        }
+                        var sp = document.querySelector('[data-e2e=\"like-icon\"]');
+                        if (sp && sp.offsetParent) {
+                            tap(sp);
+                            var pb = sp.closest('button');
+                            if (pb) tap(pb);
+                            return 'clicked-span';
+                        }
+                        return 'not-found';
+                    })()
+                """)
+                # 3. Verifikasi: cek unlike-icon atau aria-label berubah
+                await asyncio.sleep(1)
+                verified = await tab.evaluate("""
+                    (function() {
+                        if (document.querySelector('[data-e2e=\"unlike-icon\"]')) return true;
+                        if (document.querySelector('[aria-label*=\"Unlike\"]')) return true;
+                        return false;
+                    })()
+                """)
+                if verified:
+                    break
+                if like_result.startswith('clicked') and tap_attempt < 2:
+                    print(f"    Like belum terverifikasi — retry tap...")
+
+            if like_result == 'already-liked' or verified:
+                await asyncio.sleep(1.5)
+                print(f"  - Like: ✅ berhasil ({like_result})")
+            elif like_result.startswith('clicked'):
+                # Clicked tapi ga verified — mungkin UI delay
+                await asyncio.sleep(2)
+                print(f"  - Like: ✅ clicked (unverified — mungkin UI delay)")
+            else:
+                print(f"  - Like: tombol tidak ditemukan")
 
         # === DOUBLE-CHECK SILENT BLOCK ===
         follow_ok = follow_result in ('already-following', 'clicked')
