@@ -628,7 +628,8 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         if like_result == 'already-liked':
             print("  - Like: sudah di-like")
         elif like_result.startswith('clicked'):
-            await asyncio.sleep(1)
+            # Jeda biar heart merah render sebelum screenshot
+            await asyncio.sleep(2)
             print(f"  - Like: ✅ berhasil ({like_result})")
         else:
             print("  - Like: tombol tidak ditemukan")
@@ -644,7 +645,7 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 continue
             raise Exception("TikTok: tombol tidak ditemukan setelah 3x retry.")
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         return  # sukses
 
     raise Exception("TikTok gagal setelah 3x retry")
