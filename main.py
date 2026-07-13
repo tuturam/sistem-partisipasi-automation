@@ -588,37 +588,29 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
             print("  - Follow: tombol tidak ditemukan")
 
         # === LIKE (TikTok video page) ===
-        # Struktur: BUTTON[aria-label="Like video\n..."] > SPAN[data-e2e="like-icon"]
+        # BUTTON[aria-label*="Like video"] > SPAN[data-e2e="like-icon"]
         like_result = await tab.evaluate("""
-            (() => {
-                // Cek udah like
-                const unlikeBtn = document.querySelector('[aria-label*=\"Unlike\"]');
-                if (unlikeBtn) return 'already-liked';
-
-                // Cari button like
-                for (const btn of document.querySelectorAll('button')) {
-                    const aria = btn.getAttribute('aria-label') || '';
-                    if ((aria.startsWith('Like video') || aria.startsWith('Suka video'))
-                        && btn.offsetParent !== null) {
-                        btn.scrollIntoView({behavior:'instant',block:'center'});
-                        btn.click();
-                        btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                        btn.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true}));
-                        return 'clicked';
+            (function() {
+                var u = document.querySelector('[aria-label*=\"Unlike\"]');
+                if (u) return 'already-liked';
+                var btns = document.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    var b = btns[i];
+                    var a = b.getAttribute('aria-label') || '';
+                    if (a.indexOf('Like video') === 0 || a.indexOf('Suka video') === 0) {
+                        if (b.offsetParent) {
+                            b.scrollIntoView();
+                            b.click();
+                            b.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                            return 'clicked';
+                        }
                     }
                 }
-                // Fallback: click span like-icon
-                const span = document.querySelector('[data-e2e=\"like-icon\"]');
-                if (span && span.offsetParent !== null) {
-                    span.scrollIntoView({behavior:'instant',block:'center'});
-                    span.click();
-                    span.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                    // Juga click parent button
-                    const parentBtn = span.closest('button');
-                    if (parentBtn) {
-                        parentBtn.click();
-                        parentBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                    }
+                var sp = document.querySelector('[data-e2e=\"like-icon\"]');
+                if (sp && sp.offsetParent) {
+                    sp.scrollIntoView();
+                    sp.click();
+                    sp.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
                     return 'clicked-span';
                 }
                 return 'not-found';
