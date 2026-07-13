@@ -694,30 +694,44 @@ async def do_instagram_task(tab: zd.Tab, url: str):
                 else:
                     print("  - Follow: tombol tidak ditemukan")
 
-            # --- LIKE (direct JS — bypass zendriver select_all) ---
-            # Instagram Like: DIV[role="button"] > SPAN > SVG[aria-label="Like"]
-            like_clicked = await tab.evaluate("""
-                (() => {
-                    for (const svg of document.querySelectorAll('svg[aria-label="Like"],svg[aria-label="Suka"]')) {
-                        if (svg.offsetParent === null) continue;
-                        const btn = svg.closest('div[role="button"]');
-                        if (btn && btn.offsetParent !== null) {
-                            btn.click();
-                            btn.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}));
-                            return 'clicked-button';
+            # --- LIKE (polling — Instagram lazy-load interaction buttons) ---
+            like_clicked = 'not-found'
+            for _ in range(8):  # polling 8x0.5s = 4 detik
+                like_clicked = await tab.evaluate("""
+                    (() => {
+                        for (const svg of document.querySelectorAll('svg[aria-label="Like"],svg[aria-label="Suka"]')) {
+                            if (svg.offsetParent === null) continue;
+                            const btn = svg.closest('div[role="button"]');
+                            if (btn && btn.offsetParent !== null) {
+                                btn.click();
+                                btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                                return 'clicked-button';
+                            }
+                            svg.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                            return 'clicked-svg';
                         }
-                        svg.dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}));
-                        return 'clicked-svg';
-                    }
-                    // Cek udah unlike
-                    if (document.querySelector('svg[aria-label="Unlike"]') ||
-                        document.querySelector('svg[aria-label="Tidak Suka"]')) {
-                        return 'already-liked';
-                    }
-                    return 'not-found';
-                })()
-            """)
-            if like_clicked == 'clicked-button' or like_clicked == 'clicked-svg':
+                        // Cek udah unlike
+                        if (document.querySelector('svg[aria-label="Unlike"]') ||
+                            document.querySelector('svg[aria-label="Tidak Suka"]')) {
+                            return 'already-liked';
+                        }
+                        // Coba DIV[role=button] dengan text Like
+                        for (const d of document.querySelectorAll('div[role="button"]')) {
+                            const t = (d.textContent||'').trim();
+                            if ((t === 'Like' || t === 'Suka') && d.offsetParent !== null) {
+                                d.click();
+                                d.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                                return 'clicked-div';
+                            }
+                        }
+                        return 'not-found';
+                    })()
+                """)
+                if like_clicked != 'not-found':
+                    break
+                await asyncio.sleep(0.5)
+
+            if like_clicked in ('clicked-button', 'clicked-svg', 'clicked-div'):
                 await asyncio.sleep(1)
                 print(f"  - Like: ✅ berhasil ({like_clicked})")
             elif like_clicked == 'already-liked':
