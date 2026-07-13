@@ -586,30 +586,40 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         else:
             print("  - Follow: tombol tidak ditemukan")
 
-        # === LIKE (TikTok video page) ===
-        # BUTTON[aria-label*="Like video"] > SPAN[data-e2e="like-icon"]
+        # === LIKE (TikTok video page — full touch simulation) ===
+        # TikTok mobile web butuh touch + pointer events, bukan cuma click
         like_result = await tab.evaluate("""
             (function() {
-                var u = document.querySelector('[aria-label*=\"Unlike\"]');
-                if (u) return 'already-liked';
+                function tap(el) {
+                    el.scrollIntoView();
+                    el.dispatchEvent(new PointerEvent('pointerdown',
+                        {bubbles:true,cancelable:true,pointerId:1,isPrimary:true}));
+                    el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));
+                    el.dispatchEvent(new PointerEvent('pointerup',
+                        {bubbles:true,cancelable:true,pointerId:1,isPrimary:true}));
+                    el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true}));
+                    el.click();
+                    el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                }
+                // Cek unlike
+                if (document.querySelector('[aria-label*=\"Unlike\"]')) return 'already-liked';
+                // Cari button like via aria-label
                 var btns = document.querySelectorAll('button');
                 for (var i = 0; i < btns.length; i++) {
-                    var b = btns[i];
-                    var a = b.getAttribute('aria-label') || '';
-                    if (a.indexOf('Like video') === 0 || a.indexOf('Suka video') === 0) {
-                        if (b.offsetParent) {
-                            b.scrollIntoView();
-                            b.click();
-                            b.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                            return 'clicked';
-                        }
+                    var a = btns[i].getAttribute('aria-label') || '';
+                    if ((a.indexOf('Like video')===0 || a.indexOf('Suka video')===0) &&
+                        btns[i].offsetParent) {
+                        tap(btns[i]);
+                        return 'clicked-btn';
                     }
                 }
+                // Fallback: span[data-e2e="like-icon"]
                 var sp = document.querySelector('[data-e2e=\"like-icon\"]');
                 if (sp && sp.offsetParent) {
-                    sp.scrollIntoView();
-                    sp.click();
-                    sp.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                    tap(sp);
+                    // Juga tap parent button
+                    var pb = sp.closest('button');
+                    if (pb) tap(pb);
                     return 'clicked-span';
                 }
                 return 'not-found';
