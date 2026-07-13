@@ -482,16 +482,17 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
 
     for attempt in range(3):
         print(f"  [TikTok] Attempt {attempt + 1}/3...")
+        # Navigate ke URL (kecuali last attempt + headless → skip ke visible)
         if attempt < 2 or not HEADLESS_MODE:
-            # Navigate ke URL
             await tab.get(url)
             await asyncio.sleep(5)
-            # Log final URL setelah redirect
             final = tab.url
             print(f"  [TikTok] Final URL: {final}")
             if '/video/' not in (final or ''):
-                print(f"  ⚠️ Bukan halaman video TikTok! Redirect ke: {final}")
-        # Kalo attempt 3 + headless → langsung visible (skip headless navigate)
+                print(f"  ⚠️ Bukan halaman video! Redirect: {final}")
+        else:
+            # Attempt 3 headless → langsung visible, jangan sentuh headless
+            print("  [TikTok] Skip headless — langsung visible")
 
         # DETEKSI BLOK
         block = await _detect_tiktok_block(tab)
