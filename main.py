@@ -610,38 +610,49 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
         if not like_ready:
             print("  - Like: tombol belum render — skip")
         else:
-            # 2. Click with verification — approach simpel
+            # 2. Click — CDP real mouse event (OS-level, impossible to detect)
             like_result = 'not-found'
             for tap_attempt in range(3):
+                # Cek unlike dulu
                 like_result = await tab.evaluate("""
                     (function() {
                         if (document.querySelector('[data-e2e=\"unlike-icon\"]')) return 'already-liked';
                         if (document.querySelector('[aria-label*=\"Unlike\"]')) return 'already-liked';
-                        // Coba click span like-icon (TikTok handler ada di span)
-                        var sp = document.querySelector('[data-e2e=\"like-icon\"]');
-                        if (sp && sp.offsetParent) {
-                            sp.scrollIntoView({block:'center'});
-                            sp.focus();
-                            sp.click();
-                            // Event chain
-                            ['mousedown','mouseup','click','pointerdown','pointerup'].forEach(
-                                function(t){sp.dispatchEvent(new Event(t,{bubbles:true,cancelable:true}));}
-                            );
-                            return 'clicked-span';
-                        }
-                        // Fallback: click button with aria-label Like
-                        var btns = document.querySelectorAll('button');
-                        for (var i=0;i<btns.length;i++) {
-                            var a=btns[i].getAttribute('aria-label')||'';
-                            if (a.indexOf('Like video')===0&&btns[i].offsetParent) {
-                                btns[i].click();
-                                return 'clicked-btn';
-                            }
-                        }
-                        return 'not-found';
+                        return 'not-liked';
                     })()
                 """)
+                if like_result == 'already-liked':
+                    break
+
+                # Dapatkan koordinat like-icon
+                rect = await tab.evaluate("""
+                    (function() {
+                        var sp = document.querySelector('[data-e2e=\"like-icon\"]');
+                        if (!sp || !sp.offsetParent) return null;
+                        var r = sp.getBoundingClientRect();
+                        return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)};
+                    })()
+                """)
+
+                if not rect:
+                    like_result = 'not-found'
+                    break
+
+                x, y = rect['x'], rect['y']
+                print(f"    CDP click at ({x}, {y})")
+
+                # Real mouse click via CDP Input (domain = input_ karena 'input' keyword Python)
+                await tab.send(zd.cdp.input_.dispatch_mouse_event(
+                    type_="mousePressed", x=x, y=y,
+                    button="left", click_count=1))
+                await asyncio.sleep(0.1)
+                await tab.send(zd.cdp.input_.dispatch_mouse_event(
+                    type_="mouseReleased", x=x, y=y,
+                    button="left", click_count=1))
+
                 await asyncio.sleep(1.5)
+
+                # Verifikasi
                 verified = await tab.evaluate("""
                     (function() {
                         if (document.querySelector('[data-e2e=\"unlike-icon\"]')) return 'yes';
@@ -650,17 +661,17 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                     })()
                 """)
                 if verified == 'yes':
+                    like_result = 'clicked-verified'
                     break
-                if like_result.startswith('clicked') and tap_attempt < 2:
-                    print(f"    Like belum terverifikasi (att {tap_attempt+1}) — retry...")
-                    await asyncio.sleep(1)
+                if tap_attempt < 2:
+                    print(f"    CDP click belum verified — retry...")
 
-            if like_result == 'already-liked' or verified == 'yes':
+            if like_result in ('already-liked', 'clicked-verified'):
                 await asyncio.sleep(1)
-                print(f"  - Like: ✅ berhasil")
-            elif like_result.startswith('clicked'):
+                print(f"  - Like: ✅ berhasil ({like_result})")
+            elif like_result == 'not-liked':
                 await asyncio.sleep(1)
-                print(f"  - Like: ✅ clicked (unverified — UI delay)")
+                print(f"  - Like: ✅ clicked (CDP, unverified)")
             else:
                 print(f"  - Like: tombol tidak ditemukan")
 
