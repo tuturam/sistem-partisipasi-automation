@@ -913,38 +913,95 @@ async def do_youtube_task(tab: zd.Tab, url: str):
     except Exception:
         print("  - Subscribe: tombol tidak ditemukan")
 
-    # --- LIKE ---
-    liked = False
-    for sel in ['like-button-view-model button',
-                '#segmented-like-button button',
-                'ytd-segmented-like-dislike-button-renderer button',
-                'button[aria-label*="like this video"]']:
-        try:
-            btn = await tab.select(sel, timeout=2)
-            pressed = btn.attrs.get('aria-pressed', '')
-            if pressed == 'false':
-                await btn.scroll_into_view()
-                await asyncio.sleep(0.3)
-                await btn.click()
-                # JS fallback
-                await tab.evaluate(f"""
-                    (() => {{ const el = document.querySelector('{sel}');
-                     if (el && el.getAttribute('aria-pressed')==='false') {{
-                      el.click(); el.dispatchEvent(new MouseEvent('click',
-                       {{bubbles:true,cancelable:true}})); }} }})()
-                """)
-                await asyncio.sleep(5)
-                print("  - Like: ✅ berhasil")
-                liked = True
-                break
-            elif pressed == 'true':
-                print("  - Like: sudah di-like")
-                liked = True
-                break
-        except Exception:
-            continue
+    # --- LIKE (polling JS — YouTube lazy-load interaction buttons) ---
+    like_clicked = 'not-found'
+    for _ in range(10):  # polling 10x0.5s = 5 detik
+        like_clicked = await tab.evaluate("""
+            (() => {
+                // Cek udah liked
+                const unlikeSel = [
+                    'like-button-view-model button[aria-pressed="true"]',
+                    '#segmented-like-button button[aria-pressed="true"]',
+                    'ytd-segmented-like-dislike-button-renderer button[aria-pressed="true"]',
+                    'button[aria-label*="unlike"]',
+                    'button[aria-label*="Unlike"]',
+                    'button[aria-label*="Tidak Suka"]',
+                ].join(',');
+                if (document.querySelector(unlikeSel)) return 'already-liked';
 
-    if not liked:
+                // Coba klik like button (aria-pressed="false")
+                const likeSel = [
+                    'like-button-view-model button[aria-pressed="false"]',
+                    '#segmented-like-button button[aria-pressed="false"]',
+                    'ytd-segmented-like-dislike-button-renderer button[aria-pressed="false"]',
+                ].join(',');
+                const ariaBtn = document.querySelector(likeSel);
+                if (ariaBtn && ariaBtn.offsetParent !== null) {
+                    ariaBtn.click();
+                    ariaBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                    return 'clicked-aria';
+                }
+
+                // Coba button dengan aria-label mengandung "like"
+                for (const btn of document.querySelectorAll('button')) {
+                    const label = (btn.getAttribute('aria-label')||'').toLowerCase();
+                    if ((label.includes('like this video') || label.includes('suka video ini'))
+                        && btn.offsetParent !== null) {
+                        btn.click();
+                        btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        return 'clicked-label';
+                    }
+                }
+
+                // Coba cari element dengan title "I like this"
+                for (const btn of document.querySelectorAll('button[title]')) {
+                    const t = (btn.getAttribute('title')||'').toLowerCase();
+                    if ((t.includes('like') || t.includes('suka')) && btn.offsetParent !== null) {
+                        btn.click();
+                        btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        return 'clicked-title';
+                    }
+                }
+
+                // Coba segmented button container — klik first button (like)
+                const seg = document.querySelector('ytd-segmented-like-dislike-button-renderer');
+                if (seg) {
+                    const firstBtn = seg.querySelector('button:first-of-type');
+                    if (firstBtn && firstBtn.offsetParent !== null) {
+                        firstBtn.click();
+                        firstBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        return 'clicked-segmented';
+                    }
+                }
+
+                return 'not-found';
+            })()
+        """)
+        if like_clicked != 'not-found':
+            break
+        await asyncio.sleep(0.5)
+
+    if like_clicked in ('clicked-aria', 'clicked-label', 'clicked-title', 'clicked-segmented'):
+        await asyncio.sleep(5)
+        # Verifikasi: cek apakah like benar applied
+        verify = await tab.evaluate("""
+            (() => {
+                if (document.querySelector('like-button-view-model button[aria-pressed="true"]')) return true;
+                if (document.querySelector('#segmented-like-button button[aria-pressed="true"]')) return true;
+                if (document.querySelector('button[aria-label*="unlike" i]')) return true;
+                if (document.querySelector('button[aria-label*="Unlike" i]')) return true;
+                if (document.querySelector('button[aria-label*="Tidak Suka" i]')) return true;
+                if (document.querySelector('button[title*="Unlike" i]')) return true;
+                return false;
+            })()
+        """)
+        if verify:
+            print(f"  - Like: ✅ berhasil ({like_clicked})")
+        else:
+            print(f"  - Like: ⚠️ klik terkirim ({like_clicked}) tapi unlike tidak terdeteksi")
+    elif like_clicked == 'already-liked':
+        print("  - Like: sudah di-like")
+    else:
         print("  - Like: tombol tidak ditemukan")
 
     await asyncio.sleep(2)
