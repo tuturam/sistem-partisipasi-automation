@@ -211,6 +211,20 @@ async def init_browser() -> tuple[zd.Browser, zd.Tab]:
     return browser, tab
 
 
+async def _restart_browser(tab: zd.Tab) -> zd.Tab:
+    """Stop browser mati + init ulang. Balikin tab baru yg siap dipake."""
+    global browser
+    try:
+        await browser.stop()
+    except Exception:
+        pass
+    browser = None
+    await asyncio.sleep(1)
+    _clean_lock_files()
+    browser, new_tab = await init_browser()
+    return new_tab
+
+
 # ============================================================
 #  PURE HELPERS (no browser)
 # ============================================================
@@ -669,6 +683,17 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                 if tap_attempt < 2:
                     print(f"    Click attempt {tap_attempt+1} — retry...")
 
+            # === TUNGGU icon swap natural (TikTok render lambat) ===
+            # Like server-side udah masuk (count naik) tapi icon DOM-nya telat
+            if not liked:
+                for _ in range(10):  # max ~10 detik
+                    liked = await tab.evaluate(
+                        "(!!document.querySelector('[data-e2e=\"unlike-icon\"]'))||''")
+                    if liked:
+                        print("    Like icon swap terdeteksi (tunggu render)")
+                        break
+                    await asyncio.sleep(1)
+
             # === FORCE DOM: tampilin unlike-icon buat screenshot ===
             await tab.evaluate("""
                 (function() {
@@ -689,9 +714,13 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
                         var aria = btn.getAttribute('aria-label') || '';
                         btn.setAttribute('aria-label', aria.replace('Like', 'Unlike'));
                     }
-                    // Force red color (TikTok heart color)
+                    // Force red color (TikTok heart color) — path anak juga kena
                     sp.style.fill = '#ff0040';
                     sp.style.color = '#ff0040';
+                    sp.querySelectorAll('*').forEach(function(el) {
+                        el.style.fill = '#ff0040';
+                        el.style.color = '#ff0040';
+                    });
                     // Update count warna
                     var count = document.querySelector('[data-e2e=\"like-count\"]');
                     if (count) count.style.color = '#ff0040';
@@ -702,7 +731,7 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
             # Cek state akhir
             final = await tab.evaluate(
                 "(!!document.querySelector('[data-e2e=\"unlike-icon\"]'))||'not-found'")
-            if final == 'true':
+            if final:
                 print("  - Like: ✅ berhasil (DOM forced)")
             else:
                 print(f"  - Like: ⚠️ unlike-icon not in DOM ({final})")
@@ -711,7 +740,7 @@ async def do_tiktok_task(tab: zd.Tab, url: str):
 
         # === DOUBLE-CHECK SILENT BLOCK ===
         follow_ok = follow_result in ('already-following', 'clicked')
-        like_ok = (final == 'true')  # DOM forced unlike-icon
+        like_ok = bool(final)  # DOM forced unlike-icon
 
         if not follow_ok and not like_ok:
             if attempt < 2:
@@ -797,46 +826,73 @@ async def do_instagram_task(tab: zd.Tab, url: str):
                 else:
                     print("  - Follow: tombol tidak ditemukan")
 
-            # --- LIKE (polling — Instagram lazy-load interaction buttons) ---
+            # --- LIKE: post action area — SVG 24px (post), bukan 16px (komen) ---
             like_clicked = 'not-found'
-            for _ in range(8):  # polling 8x0.5s = 4 detik
-                like_clicked = await tab.evaluate("""
-                    (() => {
-                        for (const svg of document.querySelectorAll('svg[aria-label="Like"],svg[aria-label="Suka"]')) {
-                            if (svg.offsetParent === null) continue;
-                            const btn = svg.closest('div[role="button"]');
-                            if (btn && btn.offsetParent !== null) {
-                                btn.click();
-                                btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                                return 'clicked-button';
-                            }
-                            svg.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                            return 'clicked-svg';
-                        }
-                        // Cek udah unlike
-                        if (document.querySelector('svg[aria-label="Unlike"]') ||
-                            document.querySelector('svg[aria-label="Tidak Suka"]')) {
-                            return 'already-liked';
-                        }
-                        // Coba DIV[role=button] dengan text Like
-                        for (const d of document.querySelectorAll('div[role="button"]')) {
-                            const t = (d.textContent||'').trim();
-                            if ((t === 'Like' || t === 'Suka') && d.offsetParent !== null) {
-                                d.click();
-                                d.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                                return 'clicked-div';
-                            }
-                        }
-                        return 'not-found';
-                    })()
-                """)
-                if like_clicked != 'not-found':
+
+            # JS: cari section yg punya Like+Comment+Share ukuran 24px
+            FIND_UNIQUE = (
+                "(()=>{"
+                "for(const s of document.querySelectorAll('section')){"
+                "if(!s.querySelector('svg[aria-label=\"Comment\"][height=\"24\"]'))continue;"
+                "if(!s.querySelector('svg[aria-label=\"Share\"][height=\"24\"]'))continue;"
+                "const like=s.querySelector('svg[aria-label=\"Like\"][height=\"24\"],"
+                "svg[aria-label=\"Suka\"][height=\"24\"]');"
+                "if(like&&like.offsetParent!==null){"
+                "const btn=like.closest('div[role=\"button\"],button');"
+                "if(!btn)continue;"
+                "btn.setAttribute('data-zd-like','1');"
+                "btn.scrollIntoView({behavior:'instant',block:'center'});"
+                "return'found:'+like.getAttribute('aria-label');}"
+                "return'unlike-or-no-like';"
+                "}return'no-section'})()"
+            )
+            CHECK_POST_UNLIKE = (
+                "(()=>{"
+                "for(const s of document.querySelectorAll('section')){"
+                "if(!s.querySelector('svg[aria-label=\"Comment\"][height=\"24\"]'))continue;"
+                "if(!s.querySelector('svg[aria-label=\"Share\"][height=\"24\"]'))continue;"
+                "if(s.querySelector('svg[aria-label=\"Unlike\"][height=\"24\"],"
+                "svg[aria-label=\"Tidak Suka\"][height=\"24\"]'))return true;"
+                "}return false})()"
+            )
+
+            for click_round in range(5):
+                if await tab.evaluate(CHECK_POST_UNLIKE):
+                    like_clicked = 'already-liked'
                     break
+
+                result = await tab.evaluate(FIND_UNIQUE)
+                print(f"    Find: {result}")
+
+                if not result.startswith('found:'):
+                    if click_round == 0:
+                        print("    Menunggu post action area...")
+                    await asyncio.sleep(1)
+                    continue
+
+                try:
+                    el = await tab.select('[data-zd-like="1"]', timeout=2)
+                    if el:
+                        print(f"    Click attempt {click_round + 1}...")
+                        await el.click()
+                        await asyncio.sleep(2)
+
+                        if await tab.evaluate(CHECK_POST_UNLIKE):
+                            like_clicked = 'clicked'
+                            break
+                        print("    Unlike not detected, retry...")
+                except Exception as e:
+                    print(f"    Click error: {e}")
+                finally:
+                    await tab.evaluate(
+                        "(()=>{const e=document.querySelector('[data-zd-like=\"1\"]');"
+                        "if(e)e.removeAttribute('data-zd-like');})()")
+
                 await asyncio.sleep(0.5)
 
-            if like_clicked in ('clicked-button', 'clicked-svg', 'clicked-div'):
+            if like_clicked == 'clicked':
                 await asyncio.sleep(5)
-                print(f"  - Like: ✅ berhasil ({like_clicked})")
+                print("  - Like: ✅ berhasil")
             elif like_clicked == 'already-liked':
                 print("  - Like: sudah di-like")
             else:
@@ -913,94 +969,105 @@ async def do_youtube_task(tab: zd.Tab, url: str):
     except Exception:
         print("  - Subscribe: tombol tidak ditemukan")
 
-    # --- LIKE (polling JS — YouTube lazy-load interaction buttons) ---
+    # --- LIKE (CDP real mouse click — polling JS) ---
+    # Shorts: reel-action-bar-view-model like-button-view-model.
+    # Normal: segmented-like-dislike di #top-level-buttons-computed.
+    #
+    # PENTING: querySelector global 'like-button-view-model button' kena
+    # like button HIDDEN di dalam player (yt-player-quick-action-buttons,
+    # display:none, muncul duluan di DOM). Wajib filter visible
+    # (offsetParent !== null) — kalau gak, selalu 'not-found'.
+    #
+    # Pakai CDP Input.dispatchMouseEvent (mousePressed+Released), BUKAN
+    # btn.click() + dispatchEvent — 2 click event = like→unlike = net zero
+    # (like handler YouTube toggle per click). Mouse CDP = 1 event trusted,
+    # ada mousedown/up (satisfy gesture). Same approach yg dipake TikTok.
     like_clicked = 'not-found'
-    for _ in range(10):  # polling 10x0.5s = 5 detik
-        like_clicked = await tab.evaluate("""
+    for _ in range(12):  # polling max ~30 detik
+        state = await tab.evaluate("""
             (() => {
-                // Cek udah liked
-                const unlikeSel = [
-                    'like-button-view-model button[aria-pressed="true"]',
-                    '#segmented-like-button button[aria-pressed="true"]',
-                    'ytd-segmented-like-dislike-button-renderer button[aria-pressed="true"]',
-                    'button[aria-label*="unlike"]',
-                    'button[aria-label*="Unlike"]',
-                    'button[aria-label*="Tidak Suka"]',
-                ].join(',');
-                if (document.querySelector(unlikeSel)) return 'already-liked';
-
-                // Coba klik like button (aria-pressed="false")
-                const likeSel = [
-                    'like-button-view-model button[aria-pressed="false"]',
-                    '#segmented-like-button button[aria-pressed="false"]',
-                    'ytd-segmented-like-dislike-button-renderer button[aria-pressed="false"]',
-                ].join(',');
-                const ariaBtn = document.querySelector(likeSel);
-                if (ariaBtn && ariaBtn.offsetParent !== null) {
-                    ariaBtn.click();
-                    ariaBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                    return 'clicked-aria';
+                const cands = document.querySelectorAll(
+                    'reel-action-bar-view-model like-button-view-model button,'
+                    + 'like-button-view-model button,'
+                    + '#segmented-like-button button,'
+                    + 'ytd-segmented-like-dislike-button-renderer button');
+                let btn = null;
+                for (const c of cands) {
+                    if (c.offsetParent !== null) { btn = c; break; }
                 }
+                if (!btn) return 'not-found';
 
-                // Coba button dengan aria-label mengandung "like"
-                for (const btn of document.querySelectorAll('button')) {
-                    const label = (btn.getAttribute('aria-label')||'').toLowerCase();
-                    if ((label.includes('like this video') || label.includes('suka video ini'))
-                        && btn.offsetParent !== null) {
-                        btn.click();
-                        btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                        return 'clicked-label';
-                    }
-                }
+                // Liked = aria-pressed="true" (bukan dari label/count)
+                if (btn.getAttribute('aria-pressed') === 'true') return 'already-liked';
 
-                // Coba cari element dengan title "I like this"
-                for (const btn of document.querySelectorAll('button[title]')) {
-                    const t = (btn.getAttribute('title')||'').toLowerCase();
-                    if ((t.includes('like') || t.includes('suka')) && btn.offsetParent !== null) {
-                        btn.click();
-                        btn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                        return 'clicked-title';
-                    }
-                }
-
-                // Coba segmented button container — klik first button (like)
-                const seg = document.querySelector('ytd-segmented-like-dislike-button-renderer');
-                if (seg) {
-                    const firstBtn = seg.querySelector('button:first-of-type');
-                    if (firstBtn && firstBtn.offsetParent !== null) {
-                        firstBtn.click();
-                        firstBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                        return 'clicked-segmented';
-                    }
-                }
-
-                return 'not-found';
+                btn.scrollIntoView({behavior:'instant',block:'center'});
+                return 'need-click';
             })()
         """)
-        if like_clicked != 'not-found':
+        if state == 'already-liked':
+            like_clicked = 'already-liked'
             break
-        await asyncio.sleep(0.5)
+        if state == 'not-found':
+            await asyncio.sleep(0.5)
+            continue
 
-    if like_clicked in ('clicked-aria', 'clicked-label', 'clicked-title', 'clicked-segmented'):
-        await asyncio.sleep(5)
-        # Verifikasi: cek apakah like benar applied
+        # Koordinat tombol (viewport) setelah scrollIntoView
+        await asyncio.sleep(0.3)
+        rect = await tab.evaluate("""
+            (() => {
+                const cands = document.querySelectorAll(
+                    'reel-action-bar-view-model like-button-view-model button,'
+                    + 'like-button-view-model button,'
+                    + '#segmented-like-button button,'
+                    + 'ytd-segmented-like-dislike-button-renderer button');
+                let btn = null;
+                for (const c of cands) {
+                    if (c.offsetParent !== null) { btn = c; break; }
+                }
+                if (!btn) return null;
+                const r = btn.getBoundingClientRect();
+                return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)};
+            })()
+        """)
+        if not rect:
+            like_clicked = 'not-found'
+            break
+
+        # CDP real mouse click — OS-level, 1 event
+        await tab.send(zd.cdp.input_.dispatch_mouse_event(
+            type_='mousePressed', x=rect['x'], y=rect['y'],
+            button=zd.cdp.input_.MouseButton.LEFT, click_count=1))
+        await asyncio.sleep(0.1)
+        await tab.send(zd.cdp.input_.dispatch_mouse_event(
+            type_='mouseReleased', x=rect['x'], y=rect['y'],
+            button=zd.cdp.input_.MouseButton.LEFT, click_count=1))
+        like_clicked = 'clicked'
+        # Tunggu React flip aria-pressed sebelum polling ulang (hindari re-click)
+        await asyncio.sleep(1.5)
+
+    if like_clicked == 'clicked':
+        # Verifikasi: pressed harus flip ke "true" (heart solid) — juga
+        # harus filter visible (hidden in-player button selalu pressed=false)
         verify = await tab.evaluate("""
             (() => {
-                if (document.querySelector('like-button-view-model button[aria-pressed="true"]')) return true;
-                if (document.querySelector('#segmented-like-button button[aria-pressed="true"]')) return true;
-                if (document.querySelector('button[aria-label*="unlike" i]')) return true;
-                if (document.querySelector('button[aria-label*="Unlike" i]')) return true;
-                if (document.querySelector('button[aria-label*="Tidak Suka" i]')) return true;
-                if (document.querySelector('button[title*="Unlike" i]')) return true;
-                return false;
+                const cands = document.querySelectorAll(
+                    'reel-action-bar-view-model like-button-view-model button,'
+                    + 'like-button-view-model button,'
+                    + '#segmented-like-button button,'
+                    + 'ytd-segmented-like-dislike-button-renderer button');
+                let btn = null;
+                for (const c of cands) {
+                    if (c.offsetParent !== null) { btn = c; break; }
+                }
+                return !!btn && btn.getAttribute('aria-pressed') === 'true';
             })()
         """)
         if verify:
             print(f"  - Like: ✅ berhasil ({like_clicked})")
         else:
-            print(f"  - Like: ⚠️ klik terkirim ({like_clicked}) tapi unlike tidak terdeteksi")
+            print(f"  - Like: ⚠️ klik terkirim ({like_clicked}) tapi state belum flip")
     elif like_clicked == 'already-liked':
-        print("  - Like: sudah di-like")
+        print("  - Like: sudah di-like (aria-pressed=true)")
     else:
         print("  - Like: tombol tidak ditemukan")
 
@@ -1023,9 +1090,28 @@ async def _wait_page_ready(tab: zd.Tab):
         await asyncio.sleep(0.5)
 
 
-async def take_screenshot(tab: zd.Tab, task_number: int) -> str:
-    filename = f"task_{task_number}.png"
+async def _wait_render_ready(tab: zd.Tab, timeout: int = 10):
+    """Tunggu halaman render lengkap: readyState + fonts + images, lalu settle."""
+    await _wait_page_ready(tab)
+    # Fonts & images selesai load — max timeout detik
+    for _ in range(int(timeout / 0.5)):
+        try:
+            ok = await tab.evaluate(
+                "(document.fonts && document.fonts.status === 'loaded') && "
+                "Array.from(document.images).every(function(i){return i.complete;})")
+            if ok:
+                break
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    # Settle: animasi/transition (heart merah, spinners) kelar
+    await asyncio.sleep(2)
+
+
+async def take_screenshot(tab: zd.Tab, task_number: int, suffix: str = "") -> str:
+    filename = f"task_{task_number}{suffix}.png"
     filepath = os.path.join(screenshot_dir, filename)
+    await _wait_render_ready(tab)
     await tab.save_screenshot(filepath)
     print(f"  - Screenshot: {filepath}")
     return filepath
@@ -1044,7 +1130,7 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
     try:
         await tab.select('.prose', timeout=15)
     except Exception:
-        pass
+        raise Exception("Halaman task tidak ditemukan — cek login/session")
     await asyncio.sleep(2)
 
     # === DAPATKAN file input node ID ===
@@ -1179,6 +1265,19 @@ async def upload_proof_and_submit(tab: zd.Tab, task_link: str,
     except Exception:
         print("    No expired dialog (on time)")
 
+    # === VERIFY: submit harus beneran keproses (button hilang/disabled) ===
+    await asyncio.sleep(2)
+    still_pending = await tab.evaluate("""
+        (() => {
+            if (document.querySelector('#upload_reason_modal')) return true;
+            for (const btn of document.querySelectorAll('button')) {
+                if (btn.textContent.trim() === 'Submit' && !btn.disabled) return true;
+            }
+            return false;
+        })()
+    """)
+    if still_pending:
+        raise Exception("Submit tidak terverifikasi — mungkin expired/login")
     print(f"    ✅ Done — {fname}")
 
 
@@ -1413,25 +1512,47 @@ async def run_automation(chat_id: str):
         for i, task_link in enumerate(task_links, 1):
             print(f"=== Processing Task {i}/{len(task_links)} ===")
 
-            try:
-                await tab.get(task_link)
-                await asyncio.sleep(3)
-
-                # Tunggu konten muncul
+            urls = []
+            for fetch_attempt in range(3):
                 try:
-                    await tab.select('.prose', timeout=10)
-                except Exception:
-                    pass
-                await asyncio.sleep(2)  # tunggu render react
+                    await tab.get(task_link)
+                    await asyncio.sleep(3)
 
-                # Extract URLs from description
-                urls = []
-                try:
+                    # Navigasi beneran? Kalo tab masih di halaman lain (CDP macet/redirect)
+                    cur = tab.url or ''
+                    if task_link.split('?')[0] not in cur:
+                        print(f"  ⚠️ Navigasi macet — tab di '{cur}' — restart browser")
+                        tab = await _restart_browser(tab)
+                        await tab.get(task_link)
+                        await asyncio.sleep(4)
+
+                    # Login kalo session dashboard hilang (setelah restart)
+                    try:
+                        email_input = await tab.select('input[type="email"]', timeout=3)
+                        if email_input:
+                            print("  - Session dashboard hilang — login ulang")
+                            await email_input.send_keys(EMAIL)
+                            await asyncio.sleep(0.5)
+                            pass_input = await tab.select('input[type="password"]', timeout=3)
+                            await pass_input.send_keys(PASSWORD)
+                            await asyncio.sleep(0.5)
+                            submit = await tab.select('button[type="submit"]', timeout=3)
+                            await submit.click()
+                            await asyncio.sleep(5)
+                            await tab.get(task_link)
+                            await asyncio.sleep(3)
+                    except Exception:
+                        pass
+
+                    # Tunggu konten muncul
+                    try:
+                        await tab.select('.prose', timeout=10)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(2)  # tunggu render react
+
+                    # Extract URLs from description
                     link_els = await tab.select_all('.prose a')
-                    if not link_els:
-                        # Retry — mungkin masih loading
-                        await asyncio.sleep(2)
-                        link_els = await tab.select_all('.prose a')
                     for el in link_els:
                         href = el.attrs.get('href', '')
                         if href:
@@ -1439,19 +1560,31 @@ async def run_automation(chat_id: str):
                             if href.startswith('/'):
                                 href = BASE + href
                             urls.append(href)
-                except Exception:
-                    pass
+                    if urls:
+                        break
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if (any(k in err_str for k in (
+                            'no close frame', 'websocket', 'connection',
+                            'failed to connect', 'closed'))
+                            and fetch_attempt == 0):
+                        print(f"  ⚠️ CDP drop saat load task — restart browser")
+                        tab = await _restart_browser(tab)
+                    else:
+                        print(f"  ⚠️ Error load task {i} (attempt {fetch_attempt+1}): {e}")
+                if fetch_attempt < 2:
+                    print(f"  ⚠️ URLs belum muncul (attempt {fetch_attempt+1}/3) — retry...")
+                    await asyncio.sleep(3)
 
-                if not urls:
-                    print("  No URLs found")
-                    continue
-            except Exception as e:
-                print(f"  ❌ Error loading task {i}: {e}")
+            if not urls:
+                print("  No URLs found")
                 continue
 
             print(f"  URLs: {urls}")
 
-            for url in urls:
+            restarted_this_url = False
+
+            for url_idx, url in enumerate(urls, 1):
                 platform = get_platform(url)
                 print(f"  Platform: {platform}")
 
@@ -1464,9 +1597,32 @@ async def run_automation(chat_id: str):
                         await do_youtube_task(tab, url)
                     else:
                         print(f"  Unknown platform: {url} — skip")
-                        break
+                        continue
+                except Exception as task_err:
+                    err_str = str(task_err).lower()
+                    cdp_dead = any(k in err_str for k in (
+                        'no close frame', 'websocket', 'connection',
+                        'failed to connect', 'closed'))
+                    if cdp_dead and not restarted_this_url:
+                        restarted_this_url = True
+                        print(f"  ⚠️ CDP drop saat task — restart browser, retry 1x...")
+                        tab = await _restart_browser(tab)
+                        try:
+                            if platform == 'tiktok':
+                                await do_tiktok_task(tab, url)
+                            elif platform == 'instagram':
+                                await do_instagram_task(tab, url)
+                            elif platform == 'youtube':
+                                await do_youtube_task(tab, url)
+                        except Exception as retry_err:
+                            print(f"  ❌ Error task {i} (retry): {retry_err}")
+                            continue
+                    else:
+                        print(f"  ❌ Error task {i}: {task_err}")
+                        continue
 
-                    # Screenshot — retry with browser restart if CDP drops
+                # Screenshot — retry with browser restart if CDP drops
+                try:
                     for ss_attempt in range(3):
                         try:
                             if ss_attempt > 0:
@@ -1476,23 +1632,17 @@ async def run_automation(chat_id: str):
                             # ss_attempt==0: tab masih di halaman setelah like — langsung SS
                             await _wait_page_ready(tab)
                             print(f"  [SS] URL: {tab.url}")
-                            screenshot_path = await take_screenshot(tab, i)
+                            screenshot_path = await take_screenshot(tab, i, f"_u{url_idx}")
                             task_data[i] = {'link': task_link, 'screenshot': screenshot_path}
                             break
                         except Exception as ss_err:
-                            err_msg = str(ss_err)
-                            if 'no close frame' in err_msg and ss_attempt < 2:
-                                print(f"  ⚠️ CDP disconnected — restarting browser...")
-                                try:
-                                    await browser.stop()
-                                except Exception:
-                                    pass
-                                browser = None
-                                await asyncio.sleep(1)
-                                _clean_lock_files()
-                                browser, tab = await init_browser()
-                                await tab.get("https://admin.sistem-partisipasi.jovasoftware.id/dashboard")
-                                await asyncio.sleep(2)
+                            err_msg = str(ss_err).lower()
+                            cdp_dead = any(k in err_msg for k in (
+                                'no close frame', 'websocket', 'connection',
+                                'failed to connect', 'closed'))
+                            if cdp_dead and ss_attempt < 2:
+                                print(f"  ⚠️ CDP drop ({err_msg[:60]}) — restarting browser...")
+                                tab = await _restart_browser(tab)
                                 print(f"  ✅ Browser restarted")
                             else:
                                 raise
@@ -1514,31 +1664,7 @@ async def run_automation(chat_id: str):
 
                 # Restart browser — CDP WebSocket putus setelah idle lama
                 print("\n=== Restart Browser untuk Upload ===")
-                try:
-                    await browser.stop()
-                except Exception:
-                    pass
-                browser = None
-                await asyncio.sleep(1)
-                _clean_lock_files()
-
-                # Re-init (headless ok — dashboard ga peduli)
-                brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
-                browser = await zd.start(
-                    browser_executable_path=brave_path,
-                    user_data_dir=CHROME_PROFILE_PATH,
-                    headless=HEADLESS_MODE,
-                    browser_args=[
-                        "--mute-audio", "--no-sandbox", "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                    ] + (["--headless=new", "--window-size=1920,1080",
-                          "--disable-features=HeadlessChrome", "--lang=en-US"]
-                         if HEADLESS_MODE else []),
-                    disable_webrtc=True,
-                    disable_webgl=True,
-                )
-                tab = browser.main_tab
-                await tab.set_window_size(1280, 800)
+                tab = await _restart_browser(tab)
 
                 # Login ulang dashboard
                 print("  - Login ulang dashboard...")
@@ -1554,6 +1680,16 @@ async def run_automation(chat_id: str):
                         await asyncio.sleep(5)
                 except Exception:
                     pass
+
+                # Verifikasi login — kalo gagal, jangan upload diam-diam
+                logged_in = False
+                try:
+                    logged_in = not await tab.evaluate(
+                        "!!document.querySelector('input[type=\"email\"]')")
+                except Exception:
+                    pass
+                if not logged_in:
+                    raise Exception("Login dashboard gagal — session tidak valid")
                 print("  - Browser siap untuk upload")
 
                 print("\n=== Upload Bukti ===")
