@@ -1,0 +1,832 @@
+{
+  "name": "My workflow 2",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 15
+            }
+          ]
+        }
+      },
+      "id": "b123c083-411e-47c8-baef-98854ef723f9",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -240,
+        0
+      ],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://admin.sistem-partisipasi.jovasoftware.id/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "_rsc",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6a3f626f-d15e-46de-881d-015c79f3b042",
+      "name": "HTTP Request1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        112,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ff19bee4-0d7c-4306-9d7d-1eb5ec394430",
+              "name": "data",
+              "value": "={{ $json.data }}",
+              "type": "string"
+            },
+            {
+              "id": "3b4659fe-a2e3-455d-bc08-56206a551eae",
+              "name": "nextActionId",
+              "value": "={{ $json.data.split('name=\"$ACTION_1:0\" value=\"{&quot;id&quot;:&quot;')[1].split('&quot;')[0] }}\n",
+              "type": "string"
+            },
+            {
+              "id": "a0b5d5be-b35e-4fe0-9174-cb231f5aa23a",
+              "name": "actionKey",
+              "value": "={{ $json.data.split('name=\"$ACTION_KEY\" value=\"')[1].split('\"')[0] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a43950ae-651a-447a-b654-75cb779870e1",
+      "name": "Edit Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        336,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://admin.sistem-partisipasi.jovasoftware.id/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "text/x-component"
+            },
+            {
+              "name": "next-action",
+              "value": "={{ $json.nextActionId }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "1_$ACTION_REF_1"
+            },
+            {
+              "name": "1_$ACTION_1:0",
+              "value": "={\"id\":\"{{ $json.nextActionId }}\",\"bound\":\"$@1\"}"
+            },
+            {
+              "name": "1_$ACTION_1:1",
+              "value": "[{\"data\":null}]"
+            },
+            {
+              "name": "1_$ACTION_KEY",
+              "value": "={{ $json.actionKey }}"
+            },
+            {
+              "name": "1_email",
+              "value": "ahmad_ramadhani_nst@pmberjaya.com"
+            },
+            {
+              "name": "1_password",
+              "value": "r@mmPMBparti"
+            },
+            {
+              "name": "0",
+              "value": "[{\"data\":null},\"$K1\"]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f4cccf16-af57-4e87-9d39-2c7d128adaf1",
+      "name": "HTTP Request2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a57c594e-8bc9-43e3-b58c-d5278c9f628d",
+              "name": "data",
+              "value": "={{ $json.data }}",
+              "type": "string"
+            },
+            {
+              "id": "eeb31681-4808-482f-bdda-7b54863ef1d7",
+              "name": "session_token",
+              "value": "={{ $json.data.split('\"accessToken\":\"')[1].split('\"}')[0] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b7090c32-ed8a-4bde-8d36-b839c356caba",
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        784,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.sistem-partisipasi.jovasoftware.id/api/task/user-submit-task",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "[0,3]"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "authorization",
+              "value": "=Bearer {{ $json.session_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "12a6c9f7-1a13-491b-a3dc-4de94fa087b8",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1392,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "654a0016-8cc1-4cf1-8c6f-fa45e51fa435",
+      "name": "Split tasks",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1616,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "I4fBTWrNRDxBC0n9",
+          "mode": "list",
+          "cachedResultName": "partisipasi_tasks",
+          "cachedResultUrl": "/projects/LZtcA01vjMs7raU6/datatables/I4fBTWrNRDxBC0n9"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "run_id",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "run_id": "={{ $json.id }}",
+            "task_ref": "={{ $json.task_id }}",
+            "task_url": "={{ $json.task.description.match(/href=\"([^\"]+)\"/)[1] }}",
+            "target_url": "={{ \"https://admin.sistem-partisipasi.jovasoftware.id/my-task/\" + $json.task_id }}",
+            "platform": "={{ /href=\"[^\"]*instagram/.test($json.task.description) ? \"Instagram\" : (/href=\"[^\"]*tiktok/.test($json.task.description) ? \"TikTok\" : (/href=\"[^\"]*youtu/.test($json.task.description) ? \"YouTube\" : \"\")) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "task_ref",
+              "displayName": "task_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "task_url",
+              "displayName": "task_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "target_url",
+              "displayName": "target_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "action_status",
+              "displayName": "action_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "screenshot_path",
+              "displayName": "screenshot_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "submit_status",
+              "displayName": "submit_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_error",
+              "displayName": "last_error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d9dfab91-6c17-46c4-b5ae-3b40423d558e",
+      "name": "Insert row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1872,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "pt_run_id",
+              "name": "run_id",
+              "value": "={{ $('Split tasks').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "pt_task_ref",
+              "name": "task_ref",
+              "value": "={{ $('Split tasks').item.json.task_id }}",
+              "type": "string"
+            },
+            {
+              "id": "pt_task_url",
+              "name": "task_url",
+              "value": "={{ $('Split tasks').item.json.task.description.match(/href=\"([^\"]+)\"/)[1] }}",
+              "type": "string"
+            },
+            {
+              "id": "pt_target_url",
+              "name": "target_url",
+              "value": "={{ 'https://admin.sistem-partisipasi.jovasoftware.id/my-task/' + $('Split tasks').item.json.task_id }}",
+              "type": "string"
+            },
+            {
+              "id": "pt_platform",
+              "name": "platform",
+              "value": "={{ /href=\"[^\"]*instagram/.test($('Split tasks').item.json.task.description) ? 'Instagram' : (/href=\"[^\"]*tiktok/.test($('Split tasks').item.json.task.description) ? 'TikTok' : (/href=\"[^\"]*youtu/.test($('Split tasks').item.json.task.description) ? 'YouTube' : '')) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "00bc9116-c74b-427f-b84f-77ddba19371b",
+      "name": "Prepare task",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        144,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "I0vTDFasB090Qj3g",
+          "mode": "list",
+          "cachedResultName": "platform_sessions",
+          "cachedResultUrl": "/projects/LZtcA01vjMs7raU6/datatables/I0vTDFasB090Qj3g"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "platform",
+              "keyValue": "={{ $json.platform }}"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "21bada55-3ea8-4805-9a27-bfcaa69357ce",
+      "name": "Get session",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        368,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "as_cookies_json",
+              "name": "cookies_json",
+              "value": "={{ $json.cookies_json }}",
+              "type": "string"
+            },
+            {
+              "id": "as_platform",
+              "name": "platform",
+              "value": "={{ $('Prepare task').item.json.platform }}",
+              "type": "string"
+            },
+            {
+              "id": "as_run_id",
+              "name": "run_id",
+              "value": "={{ $('Prepare task').item.json.run_id }}",
+              "type": "string"
+            },
+            {
+              "id": "as_task_ref",
+              "name": "task_ref",
+              "value": "={{ $('Prepare task').item.json.task_ref }}",
+              "type": "string"
+            },
+            {
+              "id": "as_task_url",
+              "name": "task_url",
+              "value": "={{ $('Prepare task').item.json.task_url }}",
+              "type": "string"
+            },
+            {
+              "id": "as_target_url",
+              "name": "target_url",
+              "value": "={{ $('Prepare task').item.json.target_url }}",
+              "type": "string"
+            },
+            {
+              "id": "as_admin_token",
+              "name": "admin_token",
+              "value": "={{ $('Edit Fields1').first().json.session_token }}",
+              "type": "string"
+            },
+            {
+              "id": "as_account_email",
+              "name": "account_email",
+              "value": "ahmad_ramadhani_nst@pmberjaya.com",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9c8d3b33-d690-4e7d-96e7-967080dd37e2",
+      "name": "Apply session",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        592,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "runCustomScript",
+        "scriptCode": "let item = {};\ntry { if ($json && typeof $json === 'object') item = $json; } catch (e) {}\ntry {\n  if (!item.task_url && typeof $input !== 'undefined' && $input && typeof $input.all === 'function') {\n    const all = $input.all();\n    if (all && all.length) item = all[0].json;\n  }\n} catch (e) {}\n\nconst platform = String(item.platform || '');\nconst runId = item.run_id;\nconst taskRef = item.task_ref;\nconst contentUrlRaw = String(item.task_url || '');\nconst adminUrl = String(item.target_url || '');\nconst adminToken = String(item.admin_token || '');\nconst accountEmail = String(item.account_email || '');\nconst adminUserCookie = encodeURIComponent(JSON.stringify({ name: 'Rama', role_id: 3, email: accountEmail }));\nconst raw = String(item.cookies_json || '').trim();\nconst BASE = 'https://admin.sistem-partisipasi.jovasoftware.id/';\nconst normalizeInstagramUrl = function (u) {\n  const s = String(u || '');\n  if (s.indexOf('instagram.com') === -1) return s;\n  const keys = ['/reel/', '/reels/', '/p/'];\n  let id = '';\n  for (let i = 0; i < keys.length && !id; i++) {\n    const p = s.indexOf(keys[i]);\n    if (p === -1) continue;\n    let rest = s.slice(p + keys[i].length);\n    const q1 = rest.indexOf('?');\n    if (q1 !== -1) rest = rest.slice(0, q1);\n    const q2 = rest.indexOf('/');\n    if (q2 !== -1) rest = rest.slice(0, q2);\n    id = rest;\n  }\n  if (!id) return s;\n  return 'https://www.instagram.com/p/' + id + '/';\n};\nconst contentUrl = platform === 'Instagram' ? normalizeInstagramUrl(contentUrlRaw) : contentUrlRaw;\nconst proofFile = 'partisipasi-' + String(taskRef || 'task') + '-' + (platform || 'unknown') + '.jpg';\nconst base = { platform: platform, run_id: runId, task_ref: taskRef, content_url: contentUrl, target_url: adminUrl, proof_file_name: proofFile };\n\nconst stop = function (status, message) {\n  return [{ json: Object.assign({}, base, { status: status, action_status: 'skipped', interaction_detail: message, screenshot_captured: 'no', submit_attempted: 'no', submit_status: 'skipped', submit_detail: message, last_error: message }) }];\n};\n\nif (!raw) return stop('no_session', 'cookies_json kosong untuk platform ini di tabel platform_sessions');\nif (!contentUrl) return stop('no_target_url', 'task_url dan target_url kosong');\nif (contentUrl.indexOf('sistem-partisipasi.jovasoftware.id/my-task') !== -1) return stop('admin_url_only', 'yang tersedia hanya URL halaman admin, bukan link kontennya');\n\nlet parsed;\ntry { parsed = JSON.parse(raw); } catch (e) { return stop('bad_json', String((e && e.message) || e)); }\nconst list = Array.isArray(parsed) ? parsed : (parsed && parsed.cookies ? parsed.cookies : []);\n\nconst mapSameSite = function (v) {\n  const s = String(v || '').toLowerCase();\n  if (s === 'no_restriction' || s === 'none') return 'None';\n  if (s === 'strict') return 'Strict';\n  if (s === 'lax' || s === 'unspecified') return 'Lax';\n  return undefined;\n};\n\nconst cookies = list.filter(function (c) { return c && c.name && c.value !== undefined; }).map(function (c) {\n  const out = { name: c.name, value: String(c.value), path: c.path || '/' };\n  if (c.domain) out.domain = c.domain;\n  const ss = mapSameSite(c.sameSite);\n  if (ss) out.sameSite = ss;\n  if (typeof c.httpOnly === 'boolean') out.httpOnly = c.httpOnly;\n  if (typeof c.secure === 'boolean') out.secure = c.secure;\n  if (!c.session && c.expirationDate) out.expires = Math.floor(c.expirationDate);\n  return out;\n});\nif (!cookies.length) return stop('no_cookies', 'tidak ada cookie yang bisa dibaca dari cookies_json');\n\nconst sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };\nconst setCookieFn = ($browser && typeof $browser.setCookie === 'function') ? $browser.setCookie.bind($browser) : $page.setCookie.bind($page);\nawait setCookieFn(...cookies);\n\nconst UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';\ntry { await $page.setUserAgent(UA); } catch (e) {}\ntry { await $page.setViewport({ width: 1366, height: 900, deviceScaleFactor: 1 }); } catch (e) {}\ntry { await $page.setExtraHTTPHeaders({ 'accept-language': 'en-US,en;q=0.9' }); } catch (e) {}\n\nconst sessionCookieNames = {\n  Instagram: ['sessionid', 'ds_user_id'],\n  TikTok: ['sessionid', 'sid_tt'],\n  YouTube: ['SID', 'SAPISID', 'LOGIN_INFO']\n};\nconst expected = sessionCookieNames[platform] || ['sessionid'];\n\ntry {\n  await $page.goto(contentUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });\n} catch (e) {\n  return stop('navigation_failed', String((e && e.message) || e));\n}\nawait sleep(4000);\n\nconst readPage = async function () {\n  return await $page.evaluate(function () {\n    const body = document.body && document.body.innerText ? document.body.innerText : '';\n    return { url: location.href, title: document.title, text: body.slice(0, 300) };\n  });\n};\n\nconst liveCookies = ($browser && typeof $browser.cookies === 'function') ? await $browser.cookies() : await $page.cookies();\nconst found = liveCookies.filter(function (c) { return expected.indexOf(c.name) !== -1; }).map(function (c) { return c.name; });\nconst before = await readPage();\nconst looksLoggedOut = before.url.indexOf('/login') !== -1 || before.url.indexOf('accounts.google.com') !== -1;\n\nconst pageFlags = async function () {\n  return await $page.evaluate(function () {\n    const q = function (s) { return document.querySelector(s); };\n    const loginInputs = document.querySelectorAll('input[type=\"password\"], input[name=\"username\"], input[placeholder*=\"phone\"], input[placeholder*=\"email\"]').length;\n    return {\n      url: String(location.href),\n      title: String(document.title || ''),\n      has_captcha: document.querySelectorAll('[id*=captcha],[class*=captcha],[data-testid*=captcha],#verify-ele,[class*=verify]').length > 0,\n      has_login_input: loginInputs > 0 && !q('video'),\n      has_video: !!q('video'),\n      has_like_ui: !!q('[data-e2e=\"like-icon\"]') || !!q('[data-e2e=\"unlike-icon\"]') || !!q('svg[aria-label=\"Like\"][height=\"24\"]') || !!q('like-button-view-model button') || !!q('ytd-subscribe-button-renderer button')\n    };\n  });\n};\n\nconst waitForVisible = async function (selectors, timeoutMs) {\n  const deadline = Date.now() + timeoutMs;\n  while (Date.now() < deadline) {\n    const hit = await $page.evaluate(function (selectors) {\n      const ok = function (el) {\n        if (!el) return false;\n        try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n        const r = el.getBoundingClientRect();\n        return r.width > 0 && r.height > 0;\n      };\n      for (let i = 0; i < selectors.length; i++) {\n        const nodes = document.querySelectorAll(selectors[i]);\n        for (let j = 0; j < nodes.length; j++) { if (ok(nodes[j])) return selectors[i]; }\n      }\n      return '';\n    }, selectors);\n    if (hit) return hit;\n    await sleep(1000);\n  }\n  return '';\n};\n\nconst waitRender = async function () {\n  const deadline = Date.now() + 25000;\n  let last = {};\n  while (Date.now() < deadline) {\n    last = await $page.evaluate(function (platform) {\n      const ok = function (el) {\n        if (!el) return false;\n        try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n        const r = el.getBoundingClientRect();\n        return r.width > 0 && r.height > 0;\n      };\n      const vids = document.querySelectorAll('video');\n      let videoReady = false;\n      for (let i = 0; i < vids.length; i++) { if (vids[i].readyState >= 2) { videoReady = true; break; } }\n      let imgBad = false;\n      const imgs = document.querySelectorAll('img');\n      for (let i = 0; i < imgs.length && i < 10; i++) { if (imgs[i].naturalWidth === 0 && ok(imgs[i])) { imgBad = true; break; } }\n      let likeUi = false;\n      if (platform === 'TikTok') likeUi = ok(document.querySelector('[data-e2e=\"like-icon\"]')) || ok(document.querySelector('[data-e2e=\"unlike-icon\"]')) || ok(document.querySelector('[data-e2e=\"video-title\"]'));\n      if (platform === 'Instagram') likeUi = ok(document.querySelector('svg[aria-label=\"Unlike\"][height=\"24\"]')) || ok(document.querySelector('svg[aria-label=\"Like\"][height=\"24\"]')) || ok(document.querySelector('svg[aria-label=\"Suka\"][height=\"24\"]'));\n      if (platform === 'YouTube') likeUi = ok(document.querySelector('like-button-view-model button')) || ok(document.querySelector('#segmented-like-button button')) || ok(document.querySelector('ytd-subscribe-button-renderer button'));\n      return { video: videoReady, imgBad: imgBad, ad: !!document.querySelector('.ad-showing'), likeUi: likeUi };\n    }, platform);\n    if (!last.ad && (last.video || last.likeUi) && !last.imgBad) return last;\n    await sleep(1000);\n  }\n  return last;\n};\n\nconst clickDom = async function (selectors, textWords, doneWords) {\n  return await $page.evaluate(function (selectors, textWords, doneWords) {\n    const ok = function (el) {\n      if (!el || el.disabled) return false;\n      try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n      const r = el.getBoundingClientRect();\n      return r.width > 0 && r.height > 0;\n    };\n    const norm = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };\n    const fire = function (el) {\n      try { el.scrollIntoView({ block: 'center' }); } catch (e) {}\n      el.click();\n      try { el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); } catch (e) {}\n    };\n    if (doneWords && doneWords.length) {\n      const all = Array.prototype.slice.call(document.querySelectorAll('button, [role=\"button\"], div[role=\"button\"], a'));\n      for (let i = 0; i < all.length; i++) {\n        const t = norm(all[i].innerText || all[i].textContent);\n        for (let d = 0; d < doneWords.length; d++) { if (t === doneWords[d] && ok(all[i])) return { clicked: false, matched: 'already:' + t }; }\n      }\n    }\n    for (let i = 0; i < selectors.length; i++) {\n      const nodes = document.querySelectorAll(selectors[i]);\n      for (let j = 0; j < nodes.length; j++) { if (ok(nodes[j])) { fire(nodes[j]); return { clicked: true, matched: selectors[i] }; } }\n    }\n    if (textWords && textWords.length) {\n      const all = Array.prototype.slice.call(document.querySelectorAll('button, [role=\"button\"], div[role=\"button\"], a'));\n      for (let t = 0; t < textWords.length; t++) {\n        for (let i = 0; i < all.length; i++) {\n          const label = norm(all[i].innerText || all[i].textContent);\n          if (label === textWords[t] && ok(all[i])) { fire(all[i]); return { clicked: true, matched: 'text:' + label }; }\n        }\n      }\n    }\n    return { clicked: false, matched: 'not_found' };\n  }, selectors, textWords || [], doneWords || []);\n};\n\nconst mouseLikeYouTube = async function () {\n  const sels = ['#segmented-like-button button', 'like-button-view-model button', 'ytd-segmented-like-dislike-button-renderer button'];\n  const foundLike = await $page.evaluate(function (sels) {\n    const ok = function (el) {\n      if (!el || el.disabled) return false;\n      try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n      const r = el.getBoundingClientRect();\n      return r.width > 0 && r.height > 0;\n    };\n    for (let i = 0; i < sels.length; i++) {\n      const nodes = document.querySelectorAll(sels[i]);\n      for (let j = 0; j < nodes.length; j++) {\n        const el = nodes[j];\n        if (!ok(el)) continue;\n        if (el.getAttribute('aria-pressed') === 'true') return { state: 'already_liked', sel: sels[i] };\n        const r = el.getBoundingClientRect();\n        return { state: 'found', sel: sels[i], x: r.left + r.width / 2, y: r.top + r.height / 2 };\n      }\n    }\n    return { state: 'not_found' };\n  }, sels);\n  if (foundLike.state === 'already_liked') return { clicked: false, matched: 'already_liked' };\n  if (foundLike.state !== 'found') return { clicked: false, matched: 'not_found' };\n  try {\n    await $page.mouse.click(foundLike.x, foundLike.y);\n  } catch (e) {\n    return { clicked: false, matched: 'mouse_failed' };\n  }\n  await sleep(2500);\n  const verdict = await $page.evaluate(function (sels) {\n    const ok = function (el) {\n      if (!el) return false;\n      try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n      const r = el.getBoundingClientRect();\n      return r.width > 0 && r.height > 0;\n    };\n    for (let i = 0; i < sels.length; i++) {\n      const nodes = document.querySelectorAll(sels[i]);\n      for (let j = 0; j < nodes.length; j++) { if (ok(nodes[j]) && nodes[j].getAttribute('aria-pressed') === 'true') return 'liked'; }\n    }\n    return 'unverified';\n  }, sels);\n  return { clicked: true, matched: foundLike.sel + '|' + verdict };\n};\n\nconst interactYouTube = async function (results) {\n  const isShorts = String(contentUrl).indexOf('/shorts/') !== -1;\n  results.push({ key: 'page', clicked: true, matched: JSON.stringify(await pageFlags()) });\n  for (let i = 0; i < 12; i++) {\n    const ad = await $page.evaluate(function () {\n      const ok = function (el) {\n        if (!el) return false;\n        try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n        const r = el.getBoundingClientRect();\n        return r.width > 0 && r.height > 0;\n      };\n      const sels = ['.ytp-skip-ad-button', '.ytp-ad-skip-button-modern', 'button[class*=\"ytp-ad-skip\"]'];\n      for (let i = 0; i < sels.length; i++) {\n        const nodes = document.querySelectorAll(sels[i]);\n        for (let j = 0; j < nodes.length; j++) { if (ok(nodes[j])) { nodes[j].click(); return 'skipped'; } }\n      }\n      return document.querySelector('.ad-showing') ? 'playing' : 'none';\n    });\n    if (ad === 'none') break;\n    await sleep(1000);\n  }\n  if (!isShorts) {\n    const seek = await $page.evaluate(function () {\n      const v = document.querySelector('video');\n      if (!v) return false;\n      try { v.muted = true; } catch (e) {}\n      try { const p = v.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}\n      if (v.duration && isFinite(v.duration) && v.duration > 3) { try { v.currentTime = v.duration - 1; } catch (e) {} return true; }\n      return false;\n    });\n    results.push({ key: 'play', clicked: seek, matched: 'video' });\n    await sleep(3000);\n  }\n  results.push(Object.assign({ key: 'subscribe' }, await clickDom(['ytd-subscribe-button-renderer button', '#subscribe-button button'], ['subscribe', 'berlangganan'], ['subscribed', 'berlangganan'])));\n  results.push(Object.assign({ key: 'like' }, await mouseLikeYouTube()));\n};\n\nconst interactInstagram = async function (results) {\n  await waitForVisible(['svg[aria-label=\"Like\"][height=\"24\"]', 'svg[aria-label=\"Suka\"][height=\"24\"]', 'svg[aria-label=\"Unlike\"][height=\"24\"]', 'article video', 'article'], 15000);\n  results.push(Object.assign({ key: 'follow' }, await clickDom([], ['follow', 'ikuti'], ['following', 'mengikuti', 'requested', 'diminta'])));\n  results.push(Object.assign({ key: 'like' }, await $page.evaluate(function () {\n    const ok = function (el) {\n      if (!el) return false;\n      try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n      const r = el.getBoundingClientRect();\n      return r.width > 0 && r.height > 0;\n    };\n    const unlikes = document.querySelectorAll('svg[aria-label=\"Unlike\"][height=\"24\"], svg[aria-label=\"Tidak Suka\"][height=\"24\"]');\n    for (let i = 0; i < unlikes.length; i++) { if (ok(unlikes[i])) return { clicked: false, matched: 'already_liked' }; }\n    const sections = Array.prototype.slice.call(document.querySelectorAll('section'));\n    for (let i = 0; i < sections.length; i++) {\n      const s = sections[i];\n      const like = s.querySelector('svg[aria-label=\"Like\"][height=\"24\"], svg[aria-label=\"Suka\"][height=\"24\"]');\n      const comment = s.querySelector('svg[aria-label=\"Comment\"][height=\"24\"], svg[aria-label=\"Komentar\"][height=\"24\"]');\n      const share = s.querySelector('svg[aria-label=\"Share\"][height=\"24\"], svg[aria-label=\"Bagikan\"][height=\"24\"]');\n      if (!like || !comment || !share || !ok(like)) continue;\n      const btn = like.closest('div[role=\"button\"], button') || like;\n      try { btn.scrollIntoView({ block: 'center' }); } catch (e) {}\n      btn.click();\n      return { clicked: true, matched: 'post_action_like' };\n    }\n    return { clicked: false, matched: 'not_found' };\n  })));\n  await sleep(2500);\n  results.push({ key: 'like_verify', clicked: true, matched: String(await $page.evaluate(function () { return !!document.querySelector('svg[aria-label=\"Unlike\"][height=\"24\"]'); })) });\n};\n\nconst interactTikTok = async function (results) {\n  await waitForVisible(['[data-e2e=\"video-title\"]', '[data-e2e=\"like-icon\"]', '[data-e2e=\"unlike-icon\"]', 'video'], 20000);\n  const followState = await $page.evaluate(function () {\n    const ok = function (el) {\n      if (!el) return false;\n      try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n      const r = el.getBoundingClientRect();\n      return r.width > 0 && r.height > 0;\n    };\n    return ok(document.querySelector('[data-e2e=\"unfollow-button\"]')) ? 'already_following' : '';\n  });\n  if (followState) results.push({ key: 'follow', clicked: false, matched: 'already_following' });\n  else results.push(Object.assign({ key: 'follow' }, await clickDom(['[data-e2e=\"feed-follow\"]', '[data-e2e=\"follow-button\"]', '[data-e2e=\"browse-follow\"]'], ['follow', 'ikuti'], ['following', 'mengikuti'])));\n  const tiktokLikeOnce = async function () {\n    return await $page.evaluate(function () {\n      const ok = function (el) {\n        if (!el) return false;\n        try { if (el.offsetParent === null) return false; } catch (e) { return false; }\n        const r = el.getBoundingClientRect();\n        return r.width > 0 && r.height > 0;\n      };\n      if (ok(document.querySelector('[data-e2e=\"unlike-icon\"]'))) return { clicked: false, matched: 'already_liked' };\n      const like = document.querySelector('[data-e2e=\"like-icon\"]');\n      if (!ok(like)) return { clicked: false, matched: 'not_found' };\n      like.click();\n      try { like.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); } catch (e) {}\n      return { clicked: true, matched: 'like-icon' };\n    });\n  };\n  const tiktokLiked = async function () {\n    return await $page.evaluate(function () { return !!document.querySelector('[data-e2e=\"unlike-icon\"]'); });\n  };\n  let tiktokVerdict = { clicked: false, matched: 'not_attempted' };\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const tried = await tiktokLikeOnce();\n    if (tried.matched === 'already_liked' || !tried.clicked) { tiktokVerdict = tried; break; }\n    await sleep(2500);\n    if (await tiktokLiked()) { tiktokVerdict = { clicked: true, matched: 'like-icon|liked' }; break; }\n    tiktokVerdict = { clicked: true, matched: 'like-icon|unverified,attempt' + String(attempt + 1) };\n    await sleep(2500);\n  }\n  results.push(Object.assign({ key: 'like' }, tiktokVerdict));\n  results.push({ key: 'like_verify', clicked: true, matched: String(await tiktokLiked()) });\n};\n\nconst results = [];\nif (found.length && !looksLoggedOut) {\n  try {\n    if (platform === 'YouTube') {\n      await interactYouTube(results);\n    } else if (platform === 'Instagram') {\n      await interactInstagram(results);\n    } else if (platform === 'TikTok') {\n      await interactTikTok(results);\n    } else {\n      results.push({ key: 'platform_unknown', clicked: false, matched: platform });\n    }\n  } catch (e) {\n    results.push({ key: 'interaction_error', clicked: false, matched: String((e && e.message) || e) });\n  }\n} else if (!found.length) {\n  results.push({ key: 'no_session', clicked: false, matched: 'session cookie tidak ditemukan untuk platform ini' });\n} else {\n  results.push({ key: 'login_required', clicked: false, matched: before.url });\n}\nawait waitRender();\nawait sleep(2000);\n\nlet shot = '';\ntry {\n  shot = await $page.screenshot({ type: 'jpeg', quality: 70, fullPage: false, encoding: 'base64' });\n} catch (e) {\n  results.push({ key: 'screenshot_error', clicked: false, matched: String((e && e.message) || e) });\n}\n\n// ---- submit the task on its admin page: the page itself uploads the image and handles the expired-task modal ----\nconst submit = { attempted: 'no', status: 'skipped', detail: '', error: '', file: '', button: '', modal: '', page_url: '', page_text: '' };\nconst probe = {};\n\nconst waitSubmitOutcome = async function () {\n  const deadline = Date.now() + 25000;\n  let last = {};\n  while (Date.now() < deadline) {\n    last = await $page.evaluate(function () {\n      const t = String(document.body && document.body.innerText ? document.body.innerText : '').toLowerCase();\n      const modal = document.getElementById('upload_reason_modal');\n      let modalOpen = false;\n      if (modal) {\n        try {\n          const s = window.getComputedStyle(modal);\n          const r = modal.getBoundingClientRect();\n          modalOpen = s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;\n        } catch (e) {}\n      }\n      return {\n        url: String(location.href),\n        fileInputs: document.querySelectorAll('input[type=\"file\"]').length,\n        modalOpen: modalOpen,\n        submittedText: t.indexOf('submitted your task') !== -1 || t.indexOf('thank you for submitting') !== -1 || t.indexOf('berhasil') !== -1 || t.indexOf('sukses') !== -1,\n        errorText: t.indexOf('gagal') !== -1 || t.indexOf('wajib diisi') !== -1 || t.indexOf('harus diisi') !== -1 || t.indexOf('tidak valid') !== -1\n      };\n    });\n    if (last.submittedText || last.errorText || last.modalOpen) return last;\n    if (String(last.url || '').indexOf('/my-task/') === -1) return last;\n    await sleep(1500);\n  }\n  return last;\n};\n\nconst handleExpiredModal = async function () {\n  const out = { present: false, filled: false, submitted: false };\n  const modalOpen = async function () {\n    return await $page.evaluate(function () {\n      const m = document.getElementById('upload_reason_modal');\n      if (!m) return false;\n      try {\n        const s = window.getComputedStyle(m);\n        const r = m.getBoundingClientRect();\n        return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;\n      } catch (e) { return false; }\n    });\n  };\n  out.present = await modalOpen();\n  if (!out.present) return out;\n  out.filled = await $page.evaluate(function () {\n    const m = document.getElementById('upload_reason_modal');\n    if (!m) return false;\n    const f = m.querySelector('textarea, input[type=\"text\"], input:not([type])');\n    if (!f) return false;\n    const proto = f.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n    const d = Object.getOwnPropertyDescriptor(proto, 'value');\n    if (d && d.set) { d.set.call(f, '-'); } else { f.value = '-'; }\n    f.dispatchEvent(new Event('input', { bubbles: true }));\n    f.dispatchEvent(new Event('change', { bubbles: true }));\n    return true;\n  });\n  await sleep(800);\n  out.submitted = await $page.evaluate(function () {\n    const m = document.getElementById('upload_reason_modal');\n    if (!m) return false;\n    const nodes = Array.prototype.slice.call(m.querySelectorAll('button, input[type=\"submit\"], [role=\"button\"]'));\n    for (let i = 0; i < nodes.length; i++) {\n      const label = String(nodes[i].innerText || nodes[i].textContent || nodes[i].value || '').toLowerCase().trim();\n      if (label === 'submit' || label === 'kirim' || label === 'simpan' || label === 'ok' || label === 'oke') { nodes[i].click(); return true; }\n    }\n    return false;\n  });\n  await sleep(4000);\n  return out;\n};\n\nconst clickSubmitOutsideModal = async function () {\n  const attemptOnce = async function () {\n    return await $page.evaluate(function () {\n      const norm = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };\n      const modal = document.getElementById('upload_reason_modal');\n      const wanted = ['submit', 'submit task', 'submit proof', 'kirim']; \n      const nodes = Array.prototype.slice.call(document.querySelectorAll('button, input[type=\"submit\"], [role=\"button\"]'));\n      for (let pass = 0; pass < 2; pass++) {\n        for (let t = 0; t < wanted.length; t++) {\n          for (let i = 0; i < nodes.length; i++) {\n            const el = nodes[i];\n            if (modal && modal.contains(el)) continue;\n            const rect = el.getBoundingClientRect();\n            if (!(rect.width > 0 && rect.height > 0)) continue;\n            const cst = window.getComputedStyle(el);\n            if (cst.display === 'none' || cst.visibility === 'hidden') continue;\n            const label = norm(el.innerText || el.textContent || el.value);\n            if (!label) continue;\n            const hit = pass === 0 ? (label === wanted[t]) : (label.indexOf(wanted[t]) === 0);\n            if (!hit) continue;\n            if (el.disabled) return { clicked: false, disabled: true, label: label };\n            el.click();\n            return { clicked: true, disabled: false, label: label };\n          }\n        }\n      }\n      return { clicked: false, disabled: false, label: '' };\n    });\n  };\n  let last = { clicked: false, disabled: false, label: '' };\n  for (let i = 0; i < 15; i++) {\n    last = await attemptOnce();\n    if (last.clicked) return last;\n    if (last.disabled) { await sleep(1500); continue; }\n    return last;\n  }\n  return last;\n};\n\nconst setFileInput = async function (b64, fileName, mime) {\n  return await $page.evaluate(function (b64, fileName, mime) {\n    const inputs = Array.prototype.slice.call(document.querySelectorAll('input[type=\"file\"]'));\n    if (!inputs.length) return { ok: false, reason: 'no_file_input' };\n    let target = null;\n    for (let i = 0; i < inputs.length; i++) { if (!inputs[i].disabled) { target = inputs[i]; break; } }\n    if (!target) target = inputs[0];\n    try {\n      const bin = atob(b64);\n      const bytes = new Uint8Array(bin.length);\n      for (let j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);\n      const file = new File([bytes], fileName, { type: mime });\n      const dt = new DataTransfer();\n      dt.items.add(file);\n      target.files = dt.files;\n    } catch (e) {\n      return { ok: false, reason: 'assign_failed:' + String((e && e.message) || e) };\n    }\n    try { target.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}\n    try { target.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}\n    return { ok: true, name: String(target.name || target.id || ''), count: target.files ? target.files.length : 0 };\n  }, b64, fileName, mime);\n};\n\nconst probePage = async function () {\n  return await $page.evaluate(function () {\n    const cut = function (s, n) { const t = String(s || '').replace(/ +/g, ' ').trim(); return t.length > n ? t.slice(0, n) : t; };\n    const vis = function (el) {\n      if (!el) return false;\n      const r = el.getBoundingClientRect();\n      if (!(r.width > 0 && r.height > 0)) return false;\n      const st = window.getComputedStyle(el);\n      return st.display !== 'none' && st.visibility !== 'hidden';\n    };\n    const out = { url: String(location.href), buttons: [], inputs: [], file_inputs: [], dialogs: [], upload_area: '' };\n    const files = Array.prototype.slice.call(document.querySelectorAll('input[type=\"file\"]'));\n    for (let i = 0; i < files.length; i++) {\n      out.file_inputs.push({ name: cut(files[i].getAttribute('name') || '', 30), id: cut(files[i].id || '', 30), accept: cut(files[i].accept || '', 30), visible: vis(files[i]), disabled: !!files[i].disabled });\n    }\n    const els = Array.prototype.slice.call(document.querySelectorAll('button, [role=\"button\"], a, label, input, textarea, select, [role=\"dialog\"], dialog, form'));\n    for (let i = 0; i < els.length && (out.buttons.length + out.inputs.length) < 120; i++) {\n      const el = els[i];\n      const tag = String(el.tagName || '').toLowerCase();\n      const cls = (el.className && typeof el.className === 'string') ? el.className : '';\n      const rec = { tag: tag, type: cut(el.getAttribute('type') || '', 20), name: cut(el.getAttribute('name') || '', 30), id: cut(el.id || '', 30), text: cut(el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '', 40), visible: vis(el), disabled: !!el.disabled };\n      if (tag === 'input' || tag === 'textarea' || tag === 'select') {\n        out.inputs.push(rec);\n      } else {\n        out.buttons.push(rec);\n      }\n      if (tag === 'form' || tag === 'dialog' || el.getAttribute('role') === 'dialog') out.dialogs.push(rec);\n    }\n    const norm = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };\n    const cands = Array.prototype.slice.call(document.querySelectorAll('button, a, label, div, span, h2, h3, p'));\n    for (let i = 0; i < cands.length; i++) {\n      if (norm(cands[i].textContent) !== 'upload proof') continue;\n      const parent = cands[i].parentElement;\n      out.upload_area = cut(cands[i].outerHTML, 900) + ' ||PARENT|| ' + cut(parent ? parent.outerHTML : '', 1600);\n      break;\n    }\n    return out;\n  });\n};\n\nconst clickUploadTrigger = async function () {\n  return await $page.evaluate(function () {\n    const norm = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); };\n    const vis = function (el) {\n      if (!el) return false;\n      const r = el.getBoundingClientRect();\n      if (!(r.width > 0 && r.height > 0)) return false;\n      const st = window.getComputedStyle(el);\n      return st.display !== 'none' && st.visibility !== 'hidden';\n    };\n    const nodes = Array.prototype.slice.call(document.querySelectorAll('button, a, label, [role=\"button\"], div, span'));\n    for (let i = 0; i < nodes.length; i++) {\n      const el = nodes[i];\n      if (norm(el.innerText || el.textContent) !== 'upload proof') continue;\n      if (!vis(el)) continue;\n      const target = el.closest('button, a, label, [role=\"button\"]') || el;\n      target.click();\n      return { clicked: true, tag: String(target.tagName || '').toLowerCase() };\n    }\n    const labels = Array.prototype.slice.call(document.querySelectorAll('label'));\n    for (let i = 0; i < labels.length; i++) {\n      if (!vis(labels[i])) continue;\n      labels[i].click();\n      return { clicked: true, tag: 'label' };\n    }\n    return { clicked: false };\n  });\n};\n\nif (!adminUrl) {\n  submit.detail = 'target_url kosong, submit dilewati';\n} else {\n  submit.attempted = 'yes';\n  submit.login = { state: adminToken ? 'cookie_session' : 'no_admin_token' };\n  if (adminToken) {\n    const hosts = ['admin.sistem-partisipasi.jovasoftware.id', '.sistem-partisipasi.jovasoftware.id'];\n    for (let i = 0; i < hosts.length; i++) {\n      try {\n        await setCookieFn({ name: 'access_token', value: adminToken, domain: hosts[i], path: '/', secure: true, httpOnly: false, sameSite: 'Lax' });\n      } catch (e) { submit.error = 'cookie_failed:' + String((e && e.message) || e); }\n      if (accountEmail) {\n        try {\n          await setCookieFn({ name: 'user', value: adminUserCookie, domain: hosts[i], path: '/', secure: true, httpOnly: false, sameSite: 'Lax' });\n        } catch (e) {}\n      }\n    }\n  }\n  if (!submit.error) {\n    try {\n      await $page.goto(adminUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });\n    } catch (e) {\n      submit.error = 'task_nav_failed:' + String((e && e.message) || e);\n    }\n    await sleep(4000);\n  }\n  try {\n    probe.cookies = String(await $page.evaluate(function () { return document.cookie; })).slice(0, 200);\n  } catch (e) {}\n  try {\n    probe.ls_keys = await $page.evaluate(function () {\n      const out = [];\n      try { for (let i = 0; i < window.localStorage.length; i++) out.push(String(window.localStorage.key(i))); } catch (e) {}\n      return out;\n    });\n  } catch (e) {}\n  await waitForVisible(['input[type=\"file\"]', '#upload_reason_modal', 'button'], 12000);\n  probe.page = JSON.stringify(await probePage()).slice(0, 1200);\n\n  let fileInputs = await $page.evaluate(function () { return document.querySelectorAll('input[type=\"file\"]').length; });\n  if (!fileInputs) {\n    const up = await clickUploadTrigger();\n    submit.upload_control = up && up.clicked ? String(up.tag || 'clicked') : 'not_found';\n    for (let i = 0; i < 12; i++) {\n      await sleep(1500);\n      fileInputs = await $page.evaluate(function () { return document.querySelectorAll('input[type=\"file\"]').length; });\n      if (fileInputs) break;\n    }\n  } else {\n    submit.upload_control = 'input_present';\n  }\n  submit.file_inputs = String(fileInputs);\n\n  if (!shot) {\n    submit.file = 'no_screenshot';\n  } else if (!fileInputs) {\n    submit.file = 'no_file_input';\n  } else {\n    const fi = await setFileInput(shot, proofFile, 'image/jpeg');\n    submit.file = fi && fi.ok ? ('set:' + String(fi.name || 'file') + ':' + String(fi.count || 0)) : ('not_set:' + String((fi && fi.reason) || 'unknown'));\n    await sleep(3000);\n  }\n\n  if (String(submit.file).indexOf('set:') !== 0) {\n    submit.button = 'not_clicked_no_file';\n    submit.status = 'failed';\n    submit.detail = 'bukti tidak bisa dilampirkan (' + submit.file + ')';\n  } else {\n    const mod = await handleExpiredModal();\n    submit.modal = JSON.stringify(mod);\n    let outcome = await waitSubmitOutcome();\n    if (outcome.modalOpen) {\n      const mod2 = await handleExpiredModal();\n      submit.modal = submit.modal + '|' + JSON.stringify(mod2);\n      outcome = await waitSubmitOutcome();\n    }\n    if (!outcome.submittedText && !outcome.errorText) {\n      const clicked = await clickSubmitOutsideModal();\n      submit.button = clicked && clicked.clicked ? 'clicked:submit' : (clicked && clicked.disabled ? 'disabled' : 'not_found');\n      if (submit.button === 'clicked:submit') {\n        await sleep(2500);\n        const mod3 = await handleExpiredModal();\n        if (mod3.present) submit.modal = submit.modal + '|' + JSON.stringify(mod3);\n        outcome = await waitSubmitOutcome();\n      }\n    } else {\n      submit.button = 'auto_submitted';\n    }\n    submit.outcome = JSON.stringify(outcome).slice(0, 400);\n\n    if (submit.error) {\n      submit.status = 'failed';\n      submit.detail = submit.error;\n    } else if (outcome.submittedText) {\n      submit.status = 'submitted';\n      submit.detail = 'konfirmasi sukses di halaman tugas';\n    } else if (outcome.errorText) {\n      submit.status = 'failed';\n      submit.detail = 'pesan error di halaman tugas';\n    } else if (outcome.modalOpen) {\n      submit.status = 'failed';\n      submit.detail = 'modal alasan masih terbuka setelah submit';\n    } else if (submit.button === 'not_found' || submit.button === 'disabled') {\n      submit.status = 'unknown';\n      submit.detail = 'tombol Submit tidak bisa diklik (' + submit.button + '), tanpa konfirmasi';\n    } else if (String(outcome.url || '').indexOf('/my-task/') === -1) {\n      submit.status = 'submitted';\n      submit.detail = 'dialihkan ke daftar tugas setelah upload';\n    } else if (outcome.fileInputs === 0) {\n      submit.status = 'submitted';\n      submit.detail = 'form upload hilang setelah upload';\n    } else {\n      submit.status = 'unknown';\n      submit.detail = 'tidak ada konfirmasi (button=' + submit.button + ')';\n    }\n  }\n\n  const st = await readPage();\n  submit.page_url = st.url;\n  submit.page_text = st.text;\n}\n\nconst after = await readPage();\nconst done = results.filter(function (r) { return r.clicked; }).map(function (r) { return r.key; });\n\nconst output = {\n  status: (found.length && !looksLoggedOut) ? 'interacted' : 'login_required',\n  platform: platform,\n  run_id: runId,\n  task_ref: taskRef,\n  content_url: contentUrl,\n  proof_file_name: proofFile,\n  action_status: done.length ? done.join(',') : 'none',\n  interaction_detail: JSON.stringify(results),\n  session_cookies_found: found.join(','),\n  page_url: after.url,\n  page_title: after.title,\n  page_text_sample: after.text,\n  screenshot_captured: shot ? 'yes' : 'no',\n  submit_attempted: submit.attempted,\n  submit_status: submit.status,\n  submit_detail: submit.detail,\n  submit_page_url: submit.page_url,\n  submit_page_sample: String(submit.page_text || '').slice(0, 300),\n  submit_login: JSON.stringify(submit.login || null),\n  submit_login2: JSON.stringify(submit.login2 || null),\n  submit_verify: String(submit.outcome || ''),\n  submit_button: String(submit.button || ''),\n  submit_upload: String(submit.upload_control || '') + '|inputs=' + String(submit.file_inputs || '') + '|file=' + String(submit.file || ''),\n  submit_probe: String(probe.page || '').slice(0, 1200),\n  last_error: submit.status === 'failed' ? submit.detail : ''\n};\n\nif (!shot) return [{ json: output }];\nreturn [{ json: output, binary: { data: { data: shot, mimeType: 'image/jpeg', fileName: proofFile } } }];",
+        "options": {
+          "timeout": 60000,
+          "stealth": true
+        }
+      },
+      "id": "aecf795d-f986-4b67-a24c-e49b0832d606",
+      "name": "Puppeteer",
+      "type": "n8n-nodes-puppeteer.puppeteer",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "I4fBTWrNRDxBC0n9",
+          "mode": "list",
+          "cachedResultName": "partisipasi_tasks",
+          "cachedResultUrl": "/projects/LZtcA01vjMs7raU6/datatables/I4fBTWrNRDxBC0n9"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "run_id",
+              "keyValue": "={{ $json.run_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "action_status": "={{ $json.action_status }}",
+            "screenshot_path": "={{ $json.proof_file_name }}",
+            "submit_status": "={{ $json.submit_status }}",
+            "last_error": "={{ $json.last_error }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "run_id",
+              "displayName": "run_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "task_ref",
+              "displayName": "task_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "action_status",
+              "displayName": "action_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "screenshot_path",
+              "displayName": "screenshot_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "submit_status",
+              "displayName": "submit_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_error",
+              "displayName": "last_error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "39a7224a-7618-48e5-9c02-a59445826d89",
+      "name": "Update task row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1808,
+        528
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Split tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split tasks": {
+      "main": [
+        [
+          {
+            "node": "Insert row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert row": {
+      "main": [
+        [
+          {
+            "node": "Prepare task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare task": {
+      "main": [
+        [
+          {
+            "node": "Get session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get session": {
+      "main": [
+        [
+          {
+            "node": "Apply session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply session": {
+      "main": [
+        [
+          {
+            "node": "Puppeteer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Puppeteer": {
+      "main": [
+        [
+          {
+            "node": "Update task row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "Asia/Jakarta",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "54dd48c6-008a-4af1-ae9d-85a718d2268e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1bc5c8c28105c90a06227ec5ff9647cbeae9367b56dcf193d2603948850085cf"
+  },
+  "nodeGroups": [
+    {
+      "id": "6e292f66-8241-401e-a3e6-a59cb96381ce",
+      "name": "Establish login session",
+      "nodeIds": [
+        "6a3f626f-d15e-46de-881d-015c79f3b042",
+        "a43950ae-651a-447a-b654-75cb779870e1",
+        "f4cccf16-af57-4e87-9d39-2c7d128adaf1",
+        "b7090c32-ed8a-4bde-8d36-b839c356caba"
+      ],
+      "description": "Signs in as your account so the task API returns your own pending submissions"
+    },
+    {
+      "id": "4c073353-63c9-4c31-8f48-c29b4bb73410",
+      "name": "Queue pending tasks",
+      "nodeIds": [
+        "12a6c9f7-1a13-491b-a3dc-4de94fa087b8",
+        "654a0016-8cc1-4cf1-8c6f-fa45e51fa435",
+        "d9dfab91-6c17-46c4-b5ae-3b40423d558e"
+      ],
+      "description": "Fetches every task still awaiting a submission and queues one row per task for later processing"
+    },
+    {
+      "id": "772b76d2-e4fb-4e84-8c3a-65f4e64f46fb",
+      "name": "Restore platform session",
+      "nodeIds": [
+        "00bc9116-c74b-427f-b84f-77ddba19371b",
+        "21bada55-3ea8-4805-9a27-bfcaa69357ce",
+        "9c8d3b33-d690-4e7d-96e7-967080dd37e2"
+      ],
+      "description": "Loads the platform cookies you pasted and attaches the matching account session to each queued task"
+    },
+    {
+      "id": "74c41a7c-cbf8-4881-aa6f-90b031059785",
+      "name": "Complete queued tasks",
+      "nodeIds": [
+        "aecf795d-f986-4b67-a24c-e49b0832d606",
+        "39a7224a-7618-48e5-9c02-a59445826d89"
+      ],
+      "description": "Opens each queued link in the saved session, does the like/follow/watch, submits the task with the screenshot, then records the outcome"
+    }
+  ],
+  "id": "wxCffTfobLmwS3Pm",
+  "tags": []
+}
