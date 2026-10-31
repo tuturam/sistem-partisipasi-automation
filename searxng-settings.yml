@@ -1,0 +1,8 @@
+# Generated to mirror the official get-n8n.sh stack (compose-version: 2).
+use_default_settings: true
+server:
+  limiter: false
+search:
+  formats:
+    - html
+    - json

@@ -1,0 +1,10 @@
+services:
+  n8n:
+    build: .
+    image: n8n-pupperter:2.41.6
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+volumes:
+  n8n-data:

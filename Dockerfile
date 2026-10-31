@@ -1,4 +1,5 @@
-FROM docker.n8n.io/n8nio/n8n
+ARG N8N_VERSION=2.41.6
+FROM docker.io/n8nio/n8n:${N8N_VERSION}
 
 USER root
 
@@ -22,3 +23,16 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 USER node
+
+# Bake community nodes into the image. On first run Docker seeds an empty
+# n8n-data volume with this directory, so a fresh instance already has the
+# Puppeteer node. --legacy-peer-deps avoids pulling n8n-workflow's native
+# isolated-vm dependency (n8n provides it at runtime).
+RUN mkdir -p /home/node/.n8n/nodes \
+ && cd /home/node/.n8n/nodes \
+ && echo '{"name":"installed-nodes","private":true}' > package.json \
+ && npm install --legacy-peer-deps --no-audit --no-fund \
+      n8n-nodes-puppeteer@1.5.0 \
+      n8n-nodes-browseract@1.4.0 \
+      puppeteer-extra-plugin-user-data-dir@^2.4.1 \
+ && npm cache clean --force
