@@ -36,3 +36,15 @@ RUN mkdir -p /home/node/.n8n/nodes \
       n8n-nodes-browseract@1.4.0 \
       puppeteer-extra-plugin-user-data-dir@^2.4.1 \
  && npm cache clean --force
+
+# cloudflared Quick Tunnel: auto-create a free HTTPS tunnel (no token) and set
+# WEBHOOK_URL at container start (needed for Telegram inline buttons).
+USER root
+RUN set -eux; \
+    case "$(uname -m)" in x86_64) A=amd64;; aarch64) A=arm64;; *) echo unsupported; exit 1;; esac; \
+    wget -qO /usr/local/bin/cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$A"; \
+    chmod +x /usr/local/bin/cloudflared
+COPY tunnel-entrypoint.sh /tunnel-entrypoint.sh
+RUN chmod +x /tunnel-entrypoint.sh
+USER node
+ENTRYPOINT ["tini", "--", "/tunnel-entrypoint.sh"]

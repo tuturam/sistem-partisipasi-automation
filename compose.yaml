@@ -81,8 +81,6 @@ services:
     env_file: .env
     volumes:
       - n8n-data:/home/node/.n8n
-    environment:
-      - N8N_WEBHOOK_URL=https://relenting-plastic-croon.ngrok-free.dev 
 
   runners:
     image: ghcr.io/n8n-io/runners:${N8N_VERSION}
